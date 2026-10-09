@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 # Pontos de entrada dos jobs do bundle (python_wheel_task).
 gerar_fatia = "modelbricks_gerador.cli:gerar_fatia"
+avancar_tempo = "modelbricks_gerador.cli:avancar_tempo"
 
 [dependency-groups]
 # Só para os testes locais (Databricks Connect serverless). Nunca vão para o wheel:
