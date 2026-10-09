@@ -9,6 +9,7 @@ intervalo em partes ou de uma vez produz os mesmos lotes.
 Também ficam aqui os utilitários de semente por lote, comuns a todos os sistemas.
 """
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from functools import cached_property
@@ -35,9 +36,34 @@ class Contexto:
 
     @cached_property
     def mundo(self) -> Mundo:
-        """Mundo verdadeiro da escala, montado na primeira consulta (DataFrames lazy por nome:
-        `contexto.mundo["pessoas"]`, `contexto.mundo["participacoes"]`; ver `mundo.TABELAS`)."""
-        return gerar_mundo(self.spark, self.roteiro, self.escala)
+        """Mundo verdadeiro da escala, montado na primeira consulta (DataFrames por nome:
+        `contexto.mundo["pessoas"]`, `contexto.mundo["participacoes"]`; ver `mundo.TABELAS`).
+
+        Cada tabela é calculada no Spark uma única vez, na primeira vez em que é pedida, e
+        daí em diante é uma relação local: sem isso, cada ação de cada projeção recalcularia
+        o plano do mundo inteiro (sorteios e junções) no servidor."""
+        mundo = gerar_mundo(self.spark, self.roteiro, self.escala, lambda df: materializar(self, df))
+        return Mundo(_Materializadas(self, mundo.tabelas))
+
+
+class _Materializadas(Mapping):
+    """Tabelas do mundo que se materializam sob demanda e ficam guardadas."""
+
+    def __init__(self, contexto: "Contexto", tabelas: Mapping[str, "DataFrame"]):
+        self._contexto = contexto
+        self._tabelas = tabelas
+        self._prontas: dict[str, "DataFrame"] = {}
+
+    def __getitem__(self, nome: str) -> "DataFrame":
+        if nome not in self._prontas:
+            self._prontas[nome] = materializar(self._contexto, self._tabelas[nome])
+        return self._prontas[nome]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._tabelas)
+
+    def __len__(self) -> int:
+        return len(self._tabelas)
 
 
 @dataclass(frozen=True)

@@ -33,7 +33,7 @@ Regras de geração (números no `roteiro.yaml`):
 
 import csv
 import io
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date
 from importlib import resources
@@ -92,14 +92,25 @@ def linhas(volume: int, escala: float) -> int:
     return max(1, round(volume * escala))
 
 
-def gerar_mundo(spark: "SparkSession", roteiro: Roteiro, escala: float) -> Mundo:
-    """Monta (de forma lazy) todas as tabelas do mundo verdadeiro para a escala."""
-    return _Gerador(spark, roteiro, escala).mundo()
+def gerar_mundo(
+    spark: "SparkSession", roteiro: Roteiro, escala: float,
+    materializar: "Callable[[DataFrame], DataFrame] | None" = None,
+) -> Mundo:
+    """Monta todas as tabelas do mundo verdadeiro para a escala.
+
+    As tabelas são lazy. Com `materializar`, as tabelas geradas pelo dbldatagen (a base de
+    todas as outras) são calculadas uma vez e as derivadas (participações, vendas) saem delas,
+    em vez de repetir o plano do dbldatagen a cada tabela."""
+    return _Gerador(spark, roteiro, escala, materializar).mundo()
 
 
 class _Gerador:
-    def __init__(self, spark: "SparkSession", roteiro: Roteiro, escala: float):
+    def __init__(
+        self, spark: "SparkSession", roteiro: Roteiro, escala: float,
+        materializar: "Callable[[DataFrame], DataFrame] | None" = None,
+    ):
         self.spark = spark
+        self.materializar = materializar
         self.roteiro = roteiro
         self.m = roteiro.mundo
         self.c = roteiro.catalogos
@@ -151,6 +162,8 @@ class _Gerador:
         ]
         plano = DataGenPlan(tables=especificacoes, seed=self.roteiro.seed_base, default_locale="pt_BR")
         gerado = generate(self.spark, plano)
+        if self.materializar is not None:
+            gerado = {nome: self.materializar(df) for nome, df in gerado.items()}
 
         df_municipios = municipios.df
         pessoas, empresas = gerado["pessoas"], gerado["empresas_pj"]
