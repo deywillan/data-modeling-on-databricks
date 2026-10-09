@@ -153,11 +153,20 @@ O pacote é Python 3.12 e usa o [`uv`](https://docs.astral.sh/uv/). O `databrick
 | `destino.py`, `destino_uc.py` | onde gravar: diretório local (testes) ou Unity Catalog (jobs) |
 | `relogio.py` | o relógio simulado |
 
-Os testes chamam a API pública com um destino em diretório local e inspecionam os arquivos gravados. O Spark roda no seu workspace via Databricks Connect serverless, então os testes consomem a cota do workspace; rode só os arquivos de teste do que você alterou:
+Os testes chamam a API pública com um destino em diretório local e inspecionam os arquivos gravados. O Spark roda no seu workspace via Databricks Connect serverless, então os testes consomem a cota do workspace. Para gastar pouco:
+
+- os testes não geram dados por conta própria: pedem uma das gerações compartilhadas de `tests/geracoes.py` (fixtures de sessão em `tests/conftest.py`), e cada geração roda no máximo uma vez por execução do pytest;
+- o resultado de cada geração fica em `00-gerador/.cache-testes/` (fora do Git), sob o hash do código do gerador e do roteiro. Enquanto o código não muda, uma nova execução não abre sessão no workspace. `--sem-cache` gera tudo de novo;
+- a execução padrão deixa de fora os testes marcados como `lento` (gerações extras de determinismo e de geração em partes, fatias inteiras dos artigos e o Unity Catalog).
 
 ```bash
 cd 00-gerador
+# execução padrão (sem os testes lentos)
+DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run pytest
+# só um módulo
 DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run pytest tests/test_embarque.py
+# suíte completa, sem cache
+DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run pytest -m "lento or not lento" --sem-cache
 ```
 
 Em alguns ambientes, a combinação de `pyarrow` e OpenSSL exige `OPENSSL_CONF=/dev/null` antes do comando.
