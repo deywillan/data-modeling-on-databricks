@@ -10,7 +10,7 @@ import re
 import pyarrow.parquet as pq
 import pytest
 
-from modelbricks_gerador import DestinoLocal, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro, gerar_fatia
 
 ARTIGO = "03-3fn"  # fatia com gabarito
 ESCALA = 0.05
@@ -37,9 +37,12 @@ def test_gabarito_tem_as_tabelas_do_mundo_e_nada_dele_vai_para_a_landing(mundo):
 
     assert set(tabelas) == TABELAS | {"mapa_chaves", "defeitos"}
     entregues = [p.relative_to(destino.volume).as_posix() for p in destino.volume.rglob("*") if p.is_file()]
-    # A landing tem só pastas de sistema; entidades de sistema podem ter o nome de uma
-    # tabela do mundo (ex.: `patio/veiculos/`), mas nunca na raiz nem em Parquet do gabarito.
-    assert not [c for c in entregues if c.split("/")[0] in TABELAS or c.endswith(".parquet")]
+    # A landing tem só pastas dos sistemas da fatia e o controle do relógio. Entidades de
+    # sistema podem ter o nome de uma tabela do mundo (ex.: `patio/veiculos/`) e o Núcleo
+    # entrega Parquet, mas nada do gabarito fica fora dessas pastas.
+    raizes = set(carregar_roteiro().fatia(ARTIGO).sistemas) | {"_controle"}
+    assert {c.split("/")[0] for c in entregues} <= raizes
+    assert not [c for c in entregues if "gabarito" in c]
 
 
 def test_volumes_da_escala_vem_do_estudo_de_caso(mundo):
