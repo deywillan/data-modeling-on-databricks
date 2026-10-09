@@ -60,8 +60,13 @@ def _aplicar(operacoes: list[dict], ate: date | None = None) -> dict[str, dict]:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
+    """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do Embarque (a fatia
+    tem outros sistemas)."""
     pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    tabelas = {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    for nome in ("mapa_chaves", "defeitos"):
+        tabelas[nome] = [r for r in tabelas[nome] if r["sistema"] == "embarque"]
+    return tabelas
 
 
 @pytest.fixture(scope="module")
@@ -146,7 +151,6 @@ def test_aplicar_os_lotes_em_ordem_reproduz_o_estado_derivavel_do_gabarito(com_g
     destino, carga, _ = com_gabarito
     gabarito = _gabarito(destino)
     estado = _aplicar(_operacoes(carga))
-    assert {c["sistema"] for c in gabarito["mapa_chaves"]} == {"embarque"}
 
     id_cliente = _mapa(gabarito, "id_cliente")
     clientes_viacao = {
@@ -222,6 +226,6 @@ def test_roteiro_do_estudo_de_caso_so_reentrega_cdc_no_embarque_na_taxa_do_rotei
     linhas = _linhas(arquivos)
     unicas = len({o["seq"] for o in linhas})
 
-    assert {(r["sistema"], r["tipo"]) for r in defeitos} == {("embarque", "cdc_duplicado")}
+    assert {r["tipo"] for r in defeitos} == {"cdc_duplicado"}
     assert len(defeitos) == len(linhas) - unicas
     assert abs(len(defeitos) / unicas - taxa) <= 4 * (taxa * (1 - taxa) / unicas) ** 0.5

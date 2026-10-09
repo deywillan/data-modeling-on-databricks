@@ -55,7 +55,7 @@ def projetar(contexto: Contexto, inicio: date, fim: date) -> Entrega:
     projecao = _Projecao(contexto, fim)
     datas = datas_de_snapshot(projecao.p.snapshots, contexto.roteiro.datas.inicio, fim)
     if not any(inicio <= d <= fim for d in datas):
-        return Entrega()
+        return Entrega(mapa_chaves=projecao.mapa_chaves())
     historicos = [
         Mudancas("lojas", ("id_loja",), projecao.historico_lojas()),
         Mudancas("clientes", ("id_cliente",), projecao.sujar_clientes(projecao.historico_clientes())),
@@ -228,16 +228,20 @@ class _Projecao:
         ))
 
     def mapa_chaves(self) -> "DataFrame":
+        """Mapa acumulado: as chaves usadas do início da história até `fim`."""
         mundo = self.contexto.mundo
-        clientes = self.clientes
+        fim = f"DATE'{self.fim.isoformat()}'"
+        clientes = self.clientes.where(f"data_cadastro <= {fim}")
+        vendas = self.vendas.where(f"data_venda <= {fim}")
+        veiculos = self.vendas.where(f"_dia_entrada <= {fim}")
         lojas = mundo["lojas"].where("empresa = 'mb_veiculos'").selectExpr(
             "id_loja AS _id_loja", f"{self.chave('lojas', 'id_loja', 4)} AS id_loja"
         )
         partes = [
             mapa(clientes.where("_tabela = 'pessoas'"), SISTEMA, "clientes", "id_cliente", "pessoas", "_id_verdadeiro"),
             mapa(clientes.where("_tabela = 'empresas_pj'"), SISTEMA, "clientes", "id_cliente", "empresas_pj", "_id_verdadeiro"),
-            mapa(self.vendas, SISTEMA, "veiculos", "id_veiculo", "veiculos", "_id_veiculo"),
-            mapa(self.vendas, SISTEMA, "vendas", "id_venda", "vendas_veiculos", "_id_venda"),
+            mapa(veiculos, SISTEMA, "veiculos", "id_veiculo", "veiculos", "_id_veiculo"),
+            mapa(vendas, SISTEMA, "vendas", "id_venda", "vendas_veiculos", "_id_venda"),
             mapa(lojas, SISTEMA, "lojas", "id_loja", "lojas", "_id_loja"),
         ]
         return reduce(lambda a, b: a.unionByName(b), partes)

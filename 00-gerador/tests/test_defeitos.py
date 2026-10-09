@@ -55,8 +55,13 @@ def _operacoes(destino: DestinoLocal) -> list[dict]:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
+    """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do Embarque (a fatia
+    tem outros sistemas)."""
     pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    tabelas = {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    for nome in ("mapa_chaves", "defeitos"):
+        tabelas[nome] = [r for r in tabelas[nome] if r["sistema"] == "embarque"]
+    return tabelas
 
 
 @pytest.fixture(scope="module")
