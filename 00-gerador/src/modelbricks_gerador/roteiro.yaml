@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 4
+versao: 5
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -70,6 +70,20 @@ parametros:
     area_operacao:                               # retângulo (graus) que cobre as UFs de atuação
       latitude: {minimo: -30.0, maximo: -12.0}
       longitude: {minimo: -54.0, maximo: -38.0}
+  # Marketplace parceiro da Viação (PassagemHub): eventos de venda entregues por API paginada.
+  passagemhub:
+    eventos_por_pagina: 100                      # tamanho da página da API
+    canais: {app: 0.65, site: 0.35}              # pesos relativos
+    horario_vendas: {minimo: 0, maximo: 24}      # o marketplace vende 24 h por dia
+    antecedencia_compra_dias: {minimo: 0, maximo: 45}
+    poltronas: 46
+    cancelamento: 0.06                           # evento de cancelamento antes da viagem
+    remarcacao: 0.03                             # evento de remarcação para data posterior
+    adiamento_remarcacao_dias: {minimo: 1, maximo: 15}
+    taxa_servico: 0.08                           # fração da tarifa cobrada pelo marketplace
+    # Coluna nova `pagamento` (evento coluna_nova_passagemhub): forma e parcelas.
+    formas_pagamento: {pix: 0.45, cartao_credito: 0.45, boleto: 0.10}
+    parcelas_cartao: {minimo: 1, maximo: 6}
 
 # Mundo verdadeiro: como as entidades mestres e a participação de cada uma nas empresas
 # do grupo são geradas. Pesos são relativos (não precisam somar 1).
