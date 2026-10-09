@@ -8,8 +8,8 @@ exatamente os mesmos bytes. Regras:
 - nada de Python UDF (falha via Databricks Connect serverless).
 
 Interface: `Arquivo`, `caminho_landing(...)` e os serializadores `json_linhas`, `csv` e
-`parquet`, que recebem um DataFrame e devolvem `bytes`, e `parquet_de_arrow`, para uma
-`pyarrow.Table` já coletada.
+`parquet`, que recebem um DataFrame e devolvem `bytes`, e `parquet_de_arrow` e
+`csv_de_arrow`, para uma `pyarrow.Table` já coletada.
 """
 
 import io
@@ -75,4 +75,24 @@ def parquet_de_arrow(tabela) -> bytes:
 
     buffer = io.BytesIO()
     pq.write_table(tabela.replace_schema_metadata(None), buffer, compression="snappy")
+    return buffer.getvalue()
+
+
+def csv_de_arrow(tabela) -> bytes:
+    """CSV `,` UTF-8 com cabeçalho de uma `pyarrow.Table` já coletada e ordenada.
+
+    Texto sempre entre aspas (inclusive o que já vem formatado no Spark, como "1.234,56"),
+    nulo como campo vazio, data ISO e timestamp como `AAAA-MM-DD HH:MM:SS` no fuso da coluna
+    (o da sessão, fixado pelo roteiro). Frações de segundo são descartadas.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.csv as pcsv
+
+    for i, campo in enumerate(tabela.schema):
+        if pa.types.is_timestamp(campo.type):
+            segundos = tabela.column(i).cast(pa.timestamp("s", tz=campo.type.tz), safe=False)
+            tabela = tabela.set_column(i, campo.name, pc.strftime(segundos, format="%Y-%m-%d %H:%M:%S"))
+    buffer = io.BytesIO()
+    pcsv.write_csv(tabela, buffer, pcsv.WriteOptions(quoting_style="needed"))
     return buffer.getvalue()

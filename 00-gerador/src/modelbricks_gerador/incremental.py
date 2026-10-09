@@ -23,7 +23,7 @@ nunca vão para o arquivo.
 O formato só serializa: quem precisa de texto com semântica própria (ex.: valor monetário
 como "1.234,56" no CSV) formata a coluna no Spark, na projeção, antes de chamar o motor.
 
-Interface: `Versoes`, `Formato`, `PARQUET` e `entrega_incremental(sistema, versoes, inicio,
+Interface: `Versoes`, `Formato`, `PARQUET`, `CSV` e `entrega_incremental(sistema, versoes, inicio,
 fim, formato)`. Nada aqui conhece um sistema específico.
 """
 
@@ -33,7 +33,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from .defeitos import ANOTACAO, registros, tabela_de_registros
-from .escritor import Arquivo, caminho_landing, parquet_de_arrow
+from .escritor import Arquivo, caminho_landing, csv_de_arrow, parquet_de_arrow
 from .sistemas.base import Entrega, Lote
 
 if TYPE_CHECKING:
@@ -54,6 +54,7 @@ class Formato:
 
 
 PARQUET = Formato("parquet", "parquet", parquet_de_arrow)
+CSV = Formato("csv", "csv", csv_de_arrow)
 
 
 @dataclass(frozen=True)
@@ -134,4 +135,4 @@ def _separar(sistema: str, entidade: str, tabela: "pa.Table", formato: Formato) 
     return lotes, defeitos
 
 
-__all__ = ["COLUNA_ATUALIZACAO", "Formato", "PARQUET", "Versoes", "entrega_incremental"]
+__all__ = ["COLUNA_ATUALIZACAO", "CSV", "Formato", "PARQUET", "Versoes", "entrega_incremental"]
