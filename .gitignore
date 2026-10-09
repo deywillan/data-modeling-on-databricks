@@ -1,0 +1,6 @@
+# Specs e planejamento local (não publicar no repositório público)
+specs/
+
+# Configuração local de ferramentas (Claude Code, Databricks CLI)
+.claude/
+.databricks/
