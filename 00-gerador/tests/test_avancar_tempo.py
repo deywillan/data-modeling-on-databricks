@@ -6,13 +6,15 @@ import pytest
 
 from modelbricks_gerador import avancar_tempo, gerar_fatia
 
+ESCALA = 0.01  # escala mínima: estes testes não olham volumes
+
 
 def _conteudo(pasta):
     return {p.relative_to(pasta).as_posix(): p.read_bytes() for p in pasta.rglob("*") if p.is_file()}
 
 
 def test_avancar_move_o_relogio_sem_alterar_arquivos_existentes(spark, destino):
-    gerar_fatia("01-bronze", destino, spark=spark)
+    gerar_fatia("01-bronze", destino, escala=ESCALA, spark=spark)
     antes = _conteudo(destino.raiz)
 
     resultado = avancar_tempo("01-bronze", destino, 3, spark=spark)
@@ -22,7 +24,7 @@ def test_avancar_move_o_relogio_sem_alterar_arquivos_existentes(spark, destino):
     assert {k: depois[k] for k in antes} == antes
     for schema in ("bronze", "silver", "gold"):
         assert not any((destino.raiz / schema).rglob("*"))
-    assert gerar_fatia("01-bronze", destino, spark=spark).data_relogio == date(2026, 1, 3)
+    assert gerar_fatia("01-bronze", destino, escala=ESCALA, spark=spark).data_relogio == date(2026, 1, 3)
 
 
 def test_avancar_sem_carga_inicial_falha_com_orientacao(spark, destino):

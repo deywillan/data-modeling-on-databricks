@@ -8,18 +8,21 @@ As duas devolvem um `Resultado` e imprimem uma mensagem curta em português.
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from functools import reduce
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .chaves import COLUNAS_MAPA
 from .destino import Destino
 from .relogio import Relogio, gravar_relogio, ler_relogio
 from .roteiro import Roteiro, carregar_roteiro
-from .sistemas import PROJECOES, Contexto
+from .sistemas import PROJECOES, Contexto, Entrega
 
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
 
 SCHEMAS_MEDALHAO = ("landing", "bronze", "silver", "gold")
+TABELA_MAPA_CHAVES = "mapa_chaves"  # gabarito: chave verdadeira → chave em cada sistema
 
 
 @dataclass(frozen=True)
@@ -72,10 +75,15 @@ def gerar_fatia(
         )
 
     contexto = Contexto(_sessao(spark, roteiro), roteiro, fatia, float(escala), carga_inicial=True)
-    arquivos = _projetar(contexto, roteiro.datas.inicio, ate, destino)
+    entregas = _projetar(contexto, roteiro.datas.inicio, ate, destino)
+    arquivos = sum(len(e.lotes) for e in entregas)
     if fatia.gabarito:
         for tabela in contexto.mundo:
             destino.gravar_gabarito(tabela, contexto.mundo.ordenado(tabela))
+        mapas = [e.mapa_chaves for e in entregas if e.mapa_chaves is not None]
+        if mapas:
+            mapa = reduce(lambda a, b: a.unionByName(b), mapas)
+            destino.gravar_gabarito(TABELA_MAPA_CHAVES, mapa.orderBy(*COLUNAS_MAPA))
     gravar_relogio(destino, Relogio(ate, artigo, float(escala), roteiro.versao))
     return _concluir(
         Resultado(
@@ -108,7 +116,7 @@ def avancar_tempo(
     inicio = relogio.data_simulada + timedelta(days=1)
     fim = relogio.data_simulada + timedelta(days=dias)
     contexto = Contexto(_sessao(spark, roteiro), roteiro, fatia, relogio.escala, carga_inicial=False)
-    arquivos = _projetar(contexto, inicio, fim, destino)
+    arquivos = sum(len(e.lotes) for e in _projetar(contexto, inicio, fim, destino))
     gravar_relogio(destino, Relogio(fim, artigo, relogio.escala, roteiro.versao))
     return _concluir(
         Resultado(
@@ -118,17 +126,18 @@ def avancar_tempo(
     )
 
 
-def _projetar(contexto: Contexto, inicio: date, fim: date, destino: Destino) -> int:
-    total = 0
+def _projetar(contexto: Contexto, inicio: date, fim: date, destino: Destino) -> list[Entrega]:
+    """Projeta cada sistema da fatia no intervalo e grava os lotes na landing."""
+    entregas = []
     for sistema in contexto.fatia.sistemas:
         projetar = PROJECOES.get(sistema)
         if projetar is None:
             print(f"Aviso: o sistema '{sistema}' ainda não tem projeção no gerador; ignorado.")
             continue
-        arquivos = projetar(contexto, inicio, fim)
-        destino.gravar_arquivos(arquivos)
-        total += len(arquivos)
-    return total
+        entrega = projetar(contexto, inicio, fim)
+        destino.gravar_arquivos(lote.arquivo for lote in entrega.lotes)
+        entregas.append(entrega)
+    return entregas
 
 
 def _roteiro(roteiro: Roteiro | str | Path | None) -> Roteiro:

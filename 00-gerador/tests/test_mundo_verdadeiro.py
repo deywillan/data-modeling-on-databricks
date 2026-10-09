@@ -35,7 +35,7 @@ def mundo(spark, tmp_path_factory):
 def test_gabarito_tem_as_tabelas_do_mundo_e_nada_dele_vai_para_a_landing(mundo):
     destino, tabelas = mundo
 
-    assert set(tabelas) == TABELAS
+    assert set(tabelas) == TABELAS | {"mapa_chaves"}
     entregues = [p.relative_to(destino.volume).as_posix() for p in destino.volume.rglob("*") if p.is_file()]
     assert not [c for c in entregues if any(t in c.split("/") for t in TABELAS) or c.endswith(".parquet")]
 

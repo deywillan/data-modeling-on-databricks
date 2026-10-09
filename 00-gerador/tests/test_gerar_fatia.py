@@ -5,13 +5,15 @@ from pathlib import Path
 
 from modelbricks_gerador import gerar_fatia
 
+ESCALA = 0.01  # escala mínima: estes testes não olham volumes
+
 
 def _arquivos(pasta: Path) -> list[Path]:
     return sorted(p for p in pasta.rglob("*") if p.is_file())
 
 
 def test_prepara_landing_e_deixa_bronze_silver_gold_vazios(spark, destino):
-    gerar_fatia("01-bronze", destino, spark=spark)
+    gerar_fatia("01-bronze", destino, escala=ESCALA, spark=spark)
 
     raiz = destino.raiz
     for schema in ("landing", "bronze", "silver", "gold"):
@@ -22,7 +24,7 @@ def test_prepara_landing_e_deixa_bronze_silver_gold_vazios(spark, destino):
 
 
 def test_grava_municipios_do_ibge_na_landing_pela_data_simulada(spark, destino):
-    gerar_fatia("01-bronze", destino, spark=spark)
+    gerar_fatia("01-bronze", destino, escala=ESCALA, spark=spark)
 
     pasta = destino.volume / "ibge" / "municipios" / "2025-12-31"
     csvs = list(pasta.glob("*.csv"))
@@ -38,17 +40,17 @@ def _conteudo(pasta: Path) -> dict[str, bytes]:
 
 
 def test_relogio_comeca_na_data_da_carga_inicial(spark, destino):
-    resultado = gerar_fatia("01-bronze", destino, spark=spark)
+    resultado = gerar_fatia("01-bronze", destino, escala=ESCALA, spark=spark)
 
     assert resultado.gerou
     assert resultado.data_relogio == date(2025, 12, 31)
 
 
 def test_segunda_chamada_sem_reset_nao_altera_nada_e_informa_o_relogio(spark, destino):
-    gerar_fatia("01-bronze", destino, spark=spark)
+    gerar_fatia("01-bronze", destino, escala=ESCALA, spark=spark)
     antes = _conteudo(destino.raiz)
 
-    resultado = gerar_fatia("01-bronze", destino, spark=spark)
+    resultado = gerar_fatia("01-bronze", destino, escala=ESCALA, spark=spark)
 
     assert not resultado.gerou
     assert resultado.data_relogio == date(2025, 12, 31)
@@ -57,12 +59,12 @@ def test_segunda_chamada_sem_reset_nao_altera_nada_e_informa_o_relogio(spark, de
 
 
 def test_reset_recria_o_ambiente_do_zero(spark, destino):
-    gerar_fatia("01-bronze", destino, spark=spark)
+    gerar_fatia("01-bronze", destino, escala=ESCALA, spark=spark)
     antes = _conteudo(destino.raiz)
     intruso = destino.raiz / "bronze" / "sobra_de_execucao_anterior.txt"
     intruso.write_text("lixo", encoding="utf-8")
 
-    resultado = gerar_fatia("01-bronze", destino, reset=True, spark=spark)
+    resultado = gerar_fatia("01-bronze", destino, escala=ESCALA, reset=True, spark=spark)
 
     assert resultado.gerou
     assert not intruso.exists()

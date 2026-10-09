@@ -12,7 +12,18 @@ from types import SimpleNamespace
 import pytest
 from databricks.sdk.errors import AlreadyExists, NotFound
 
-from modelbricks_gerador import DestinoUC, gerar_fatia
+from modelbricks_gerador import DestinoUC, carregar_roteiro, gerar_fatia
+
+
+def _roteiro_so_ibge():
+    """A fatia 01-bronze reduzida ao IBGE: o falso não executa Spark, e o que se testa aqui
+    é só onde o destino grava, não a geração dos sistemas."""
+    roteiro = carregar_roteiro()
+    fatia = roteiro.fatias["01-bronze"].model_copy(update={"sistemas": ["ibge"]})
+    return roteiro.model_copy(update={"fatias": {**roteiro.fatias, "01-bronze": fatia}})
+
+
+_SO_IBGE = _roteiro_so_ibge()
 
 
 class _UnityCatalogFalso:
@@ -78,7 +89,7 @@ def _destino(uc):
 
 
 def test_sem_permissao_de_catalogo_usa_medalhao_com_schemas_prefixados(uc, capsys):
-    resultado = gerar_fatia("01-bronze", _destino(uc), spark=uc)
+    resultado = gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE)
 
     assert resultado.gerou
     assert "Aviso: sem permissão para criar o catálogo medalhao_01_bronze" in capsys.readouterr().out
@@ -90,14 +101,14 @@ def test_sem_permissao_de_catalogo_usa_medalhao_com_schemas_prefixados(uc, capsy
 
 
 def test_alternativa_e_idempotente_e_reset_so_apaga_os_schemas_do_artigo(uc):
-    gerar_fatia("01-bronze", _destino(uc), spark=uc)
+    gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE)
     uc.catalogos["medalhao"].add("a03_bronze")  # outro artigo no mesmo catálogo
 
-    segunda = gerar_fatia("01-bronze", _destino(uc), spark=uc)
+    segunda = gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE)
     assert not segunda.gerou
 
     uc.catalogos["medalhao"].add("a01_sobra")
-    terceira = gerar_fatia("01-bronze", _destino(uc), spark=uc, reset=True)
+    terceira = gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE, reset=True)
 
     assert terceira.gerou
     assert uc.catalogos["medalhao"] == {"a01_landing", "a01_bronze", "a01_silver", "a01_gold", "a03_bronze"}

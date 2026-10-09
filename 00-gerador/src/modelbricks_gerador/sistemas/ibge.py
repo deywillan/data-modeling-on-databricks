@@ -9,10 +9,12 @@ from datetime import date
 from importlib import resources
 
 from ..escritor import Arquivo, caminho_landing
+from .base import Contexto, Entrega, Lote
 
 
-def projetar(contexto, inicio: date, fim: date) -> list[Arquivo]:
+def projetar(contexto: Contexto, inicio: date, fim: date) -> Entrega:
     if not contexto.carga_inicial:
-        return []
+        return Entrega()
     conteudo = resources.files("modelbricks_gerador").joinpath("dados/ibge_municipios.csv").read_bytes()
-    return [Arquivo(caminho_landing("ibge", "municipios", fim, "csv"), conteudo)]
+    arquivo = Arquivo(caminho_landing("ibge", "municipios", fim, "csv"), conteudo)
+    return Entrega(lotes=[Lote("ibge", "municipios", fim, "csv", conteudo.count(b"\n") - 1, arquivo)])

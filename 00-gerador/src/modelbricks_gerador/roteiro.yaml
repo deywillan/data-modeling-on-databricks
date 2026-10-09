@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 1
+versao: 2
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -40,6 +40,17 @@ parametros:
   pessoas_em_mais_de_uma_empresa: 0.15
   eventos_por_frete: {minimo: 5, maximo: 8}
   telemetria_dias_carga_inicial: 90
+  # Bilhetagem da Viação (Embarque): vendas e ciclo de vida das passagens.
+  embarque:
+    fracao_passagens: 0.6                        # o restante é vendido pelo PassagemHub
+    canais: {guiche: 0.45, site: 0.55}           # pesos relativos
+    horario_vendas: {minimo: 6, maximo: 22}      # vendas entre 06h e 22h
+    antecedencia_compra_dias: {minimo: 0, maximo: 30}
+    poltronas: 46
+    estorno: 0.01                                # passagem excluída (operação D)
+    cancelamento: 0.04                           # status cancelada (operação U)
+    remarcacao: 0.05                             # nova data de viagem (operação U)
+    adiamento_remarcacao_dias: {minimo: 1, maximo: 15}
 
 # Mundo verdadeiro: como as entidades mestres e a participação de cada uma nas empresas
 # do grupo são geradas. Pesos são relativos (não precisam somar 1).
@@ -123,6 +134,7 @@ eventos:
     data: 2026-01-12
     sistemas: [embarque]
     descricao: Reajuste de tarifas em massa no Embarque (muitos updates de uma vez).
+    parametros: {percentual: 0.085}              # todas as tarifas sobem 8,5%
 
 # Catálogo de defeitos: taxa por sistema (fração de 0 a 1, ou `arquivo`/`coluna` quando o
 # defeito atinge o arquivo ou a coluna inteira) e artigos que tratam o defeito.

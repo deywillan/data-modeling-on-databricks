@@ -51,10 +51,25 @@ class Intervalo(_Modelo):
     maximo: int = Field(ge=0)
 
 
+class ParametrosEmbarque(_Modelo):
+    """Comportamento da bilhetagem da Viação (*Embarque*)."""
+
+    fracao_passagens: float = Field(gt=0, le=1)  # das passagens Embarque + PassagemHub
+    canais: dict[str, float] = Field(min_length=1)
+    horario_vendas: Intervalo  # horas do dia (início inclusive, fim exclusive)
+    antecedencia_compra_dias: Intervalo
+    poltronas: int = Field(gt=0)
+    estorno: float = Field(ge=0, le=1)  # exclusão física da passagem (operação D)
+    cancelamento: float = Field(ge=0, le=1)
+    remarcacao: float = Field(ge=0, le=1)
+    adiamento_remarcacao_dias: Intervalo
+
+
 class Parametros(_Modelo):
     pessoas_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
     eventos_por_frete: Intervalo
     telemetria_dias_carga_inicial: int = Field(gt=0)
+    embarque: ParametrosEmbarque
 
 
 class Periodo(_Modelo):
@@ -123,6 +138,7 @@ class Evento(_Modelo):
     data: date
     sistemas: list[str]
     descricao: str
+    parametros: dict[str, float] = Field(default_factory=dict)
 
 
 class Defeito(_Modelo):
@@ -175,6 +191,7 @@ class Roteiro(_Modelo):
         if intervalo.minimo > intervalo.maximo:
             erros.append("parametros.eventos_por_frete.minimo é maior que o máximo")
         erros += self._coerencia_do_mundo()
+        erros += self._coerencia_do_embarque()
         for nome, evento in self.eventos.items():
             erros += [f"eventos.{nome}: sistema desconhecido '{s}'" for s in evento.sistemas if s not in self.sistemas]
         for nome, defeito in self.defeitos.items():
@@ -233,6 +250,26 @@ class Roteiro(_Modelo):
             for x in c.modelos_veiculos
             if x.preco_minimo > x.preco_maximo
         ]
+        return erros
+
+    def _coerencia_do_embarque(self) -> list[str]:
+        erros = []
+        e = self.parametros.embarque
+        for nome in ("horario_vendas", "antecedencia_compra_dias", "adiamento_remarcacao_dias"):
+            intervalo = getattr(e, nome)
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"parametros.embarque.{nome}.minimo é maior que o máximo")
+        if e.horario_vendas.minimo < 1 or e.horario_vendas.maximo > 23 or e.horario_vendas.minimo == e.horario_vendas.maximo:
+            erros.append("parametros.embarque.horario_vendas deve ficar entre 1 e 23 h, com fim depois do início")
+        if e.adiamento_remarcacao_dias.minimo < 1:
+            erros.append("parametros.embarque.adiamento_remarcacao_dias.minimo deve ser pelo menos 1")
+        if e.estorno + e.cancelamento + e.remarcacao > 1:
+            erros.append("parametros.embarque: estorno + cancelamento + remarcacao passa de 1")
+        if any(p < 0 for p in e.canais.values()) or sum(e.canais.values()) <= 0:
+            erros.append("parametros.embarque.canais: pesos devem ser não negativos com soma positiva")
+        reajuste = self.eventos.get("reajuste_tarifas_embarque")
+        if reajuste is None or "percentual" not in reajuste.parametros:
+            erros.append("eventos.reajuste_tarifas_embarque: falta o evento ou o parâmetro 'percentual'")
         return erros
 
     def fatia(self, artigo: str) -> Fatia:
