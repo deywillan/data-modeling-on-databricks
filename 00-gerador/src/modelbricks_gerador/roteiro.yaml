@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 6
+versao: 7
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -51,6 +51,25 @@ parametros:
     cancelamento: 0.04                           # status cancelada (operação U)
     remarcacao: 0.05                             # nova data de viagem (operação U)
     adiamento_remarcacao_dias: {minimo: 1, maximo: 15}
+  # Telemetria da holding (Rastro): eventos de GPS e telemetria dos veículos da frota própria,
+  # entregues como muitos arquivos pequenos. Na carga inicial, só a janela de telemetria
+  # da fatia (ou `telemetria_dias_carga_inicial`), independentemente da escala. Eventos na
+  # janela, na escala 1: frota × eventos por dia × dias (400 × 72 × 90 ≈ 2,6 milhões).
+  rastro:
+    arquivos_por_dia: 24                         # granularidade: o dia em janelas iguais (24 = uma por hora)
+    lotes_de_veiculos: 1                         # arquivos por janela: a frota dividida em lotes
+    intervalo_eventos_minutos: 15                # um evento por veículo a cada 15 min de operação
+    horario_operacao: {minimo: 5, maximo: 23}    # veículos rodando entre 05h e 23h
+    km_por_dia: {minimo: 300, maximo: 700}       # quilometragem diária de cada veículo
+    velocidade_kmh: {minimo: 0, maximo: 110}
+    limite_velocidade_kmh: 90                    # acima disso, alerta de excesso de velocidade
+    frenagem_brusca: 0.01                        # fração de eventos com alerta de frenagem brusca
+    consumo_combustivel_pct_dia: {minimo: 35, maximo: 70}   # o tanque é completado a cada madrugada
+    temperatura_motor_c: {minimo: 80, maximo: 105}
+    rpm: {minimo: 600, maximo: 2200}
+    area_operacao:                               # retângulo (graus) que cobre as UFs de atuação
+      latitude: {minimo: -30.0, maximo: -12.0}
+      longitude: {minimo: -54.0, maximo: -38.0}
   # Marketplace parceiro da Viação (PassagemHub): eventos de venda entregues por API paginada.
   passagemhub:
     eventos_por_pagina: 100                      # tamanho da página da API
