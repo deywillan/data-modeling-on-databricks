@@ -11,12 +11,13 @@ pela API.
 from collections.abc import Callable
 from datetime import date
 
-from . import embarque, ibge, nucleo, passagemhub, patio, rastro, rotacerta
+from . import apolice, embarque, ibge, nucleo, passagemhub, patio, rastro, rotacerta
 from .base import Contexto, Entrega, Lote
 
 Projecao = Callable[[Contexto, date, date], Entrega]
 
 PROJECOES: dict[str, Projecao] = {
+    "apolice": apolice.projetar,
     "embarque": embarque.projetar,
     "ibge": ibge.projetar,
     "nucleo": nucleo.projetar,

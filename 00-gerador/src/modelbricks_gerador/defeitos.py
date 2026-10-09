@@ -15,8 +15,9 @@ Há três granularidades, todas registradas em `gabarito.defeitos` (`ESQUEMA`):
   chama `registros(...)` sobre as linhas efetivamente entregues, com a data do lote, e
   descarta as colunas internas (as que começam com `_`) antes de serializar. Assim, toda
   linha suja entregue tem registro, e só ela;
-- **arquivo** (ex.: `latin1`) e **coluna** (ex.: valor monetário como texto): a projeção
-  aplica a transformação ao serializar e chama `Defeitos.registro_agregado(...)` com o
+- **arquivo** (ex.: `latin1`) e **coluna** (ex.: valor monetário como texto, aplicado por
+  `Defeitos.valor_monetario_texto`): a projeção aplica a transformação antes de serializar
+  e chama `Defeitos.registro_agregado(...)` (ou `linha_agregada`, para juntar vários) com o
   arquivo ou a coluna atingidos.
 
 Ordem recomendada na projeção: duplicidade, depois os defeitos de valor e por fim os de
@@ -212,6 +213,18 @@ class Defeitos:
 
     # -- arquivo e coluna inteiros -------------------------------------------------------------
 
+    def valor_monetario_texto(self, df: "DataFrame", colunas: tuple[str, ...]) -> "DataFrame":
+        """Coluna inteira: valores monetários como texto no formato brasileiro ("1.234,56").
+        Sem a taxa `coluna` no roteiro, as colunas continuam numéricas. Quem monta os lotes
+        registra o defeito por arquivo com `registro_agregado`/`linha_agregada`."""
+        if self.taxa("valor_monetario_texto") != "coluna":
+            return df
+        from pyspark.sql import functions as F
+
+        for coluna in colunas:
+            df = df.withColumn(coluna, F.translate(F.format_number(F.col(coluna), 2), ",.", ".,"))
+        return df
+
     def registro_agregado(
         self,
         spark: "SparkSession",
@@ -227,14 +240,33 @@ class Defeitos:
         """Registro de um defeito que atinge um arquivo inteiro (`arquivo`, ex.: `latin1`) ou
         uma coluna inteira (`coluna`, ex.: valor monetário como texto), com um exemplo opcional
         de valor original e sujo."""
+        linha = self.linha_agregada(
+            tipo, entidade, data_entrega, arquivo=arquivo, coluna=coluna,
+            valor_original=valor_original, valor_sujo=valor_sujo,
+        )
+        return spark.createDataFrame([linha], ESQUEMA)
+
+    def linha_agregada(
+        self,
+        tipo: str,
+        entidade: str,
+        data_entrega,
+        *,
+        arquivo: str | None = None,
+        coluna: str | None = None,
+        valor_original: str | None = None,
+        valor_sujo: str | None = None,
+    ) -> tuple:
+        """O mesmo registro de `registro_agregado` como tupla (ordem de `COLUNAS_DEFEITOS`),
+        para juntar muitos registros (um por arquivo) num só DataFrame com
+        `tabela_de_registros`."""
         if arquivo is None and coluna is None:
             raise ValueError("Informe o arquivo ou a coluna atingidos pelo defeito.")
         granularidade = "coluna" if coluna is not None else "arquivo"
-        linha = (
+        return (
             self.sistema, entidade, granularidade, tipo, list(self.roteiro.defeitos[tipo].artigos), coluna, None,
             None, None, valor_original, valor_sujo, data_entrega, None, arquivo,
         )
-        return spark.createDataFrame([linha], ESQUEMA)
 
     # -- internos ----------------------------------------------------------------------------
 

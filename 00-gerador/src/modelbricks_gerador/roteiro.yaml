@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 8
+versao: 9
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -148,6 +148,21 @@ parametros:
     clientes_grupo:
       mb_viacao: ModelBricks Viação S.A.
       mb_cargas: ModelBricks Cargas S.A.
+  # Sistema de apólices da ModelBricks Seguros (Apólice+): incremental por updated_at em CSV.
+  # Segurados são os clientes da ModelBricks Seguros na participação do mundo verdadeiro. As
+  # apólices avulsas (`volumes.apolices`, na escala 1, em 2024 e 2025) são emitidas na
+  # proporção dos segurados já cadastrados; as vendidas junto com veículos vêm por cima.
+  apolice:
+    horario_expediente: {minimo: 8, maximo: 18}  # emissões e alterações do dia a dia
+    atualizacao_segurado_ao_ano: 0.20            # troca de telefone do segurado
+    vigencia_meses: 12
+    ramos_pf: {vida: 0.40, residencial: 0.40, viagem: 0.20}
+    ramos_pj: {empresarial: 0.50, responsabilidade_civil: 0.30, transporte: 0.20}
+    importancia_segurada: {minimo: 20000, maximo: 2000000}   # R$, apólices avulsas
+    taxa_premio: {minimo: 0.005, maximo: 0.03}   # prêmio anual / importância segurada
+    seguro_na_venda: 0.60                        # vendas de veículo a segurados que levam o seguro
+    taxa_premio_veiculo: {minimo: 0.02, maximo: 0.05}
+    cancelamento: 0.08                           # apólice cancelada durante a vigência
 
 # Mundo verdadeiro: como as entidades mestres e a participação de cada uma nas empresas
 # do grupo são geradas. Pesos são relativos (não precisam somar 1).

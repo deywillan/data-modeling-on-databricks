@@ -199,6 +199,21 @@ class ParametrosPatio(_Modelo):
     clientes_grupo: dict[str, str] = Field(min_length=1)  # empresa do grupo → razão social
 
 
+class ParametrosApolice(_Modelo):
+    """Comportamento do sistema de apólices da ModelBricks Seguros (*Apólice+*)."""
+
+    horario_expediente: Intervalo  # horas do dia (início inclusive, fim exclusive)
+    atualizacao_segurado_ao_ano: float = Field(ge=0, le=1)
+    vigencia_meses: int = Field(gt=0)
+    ramos_pf: dict[str, float] = Field(min_length=1)
+    ramos_pj: dict[str, float] = Field(min_length=1)
+    importancia_segurada: Intervalo
+    taxa_premio: IntervaloReal
+    seguro_na_venda: float = Field(ge=0, le=1)
+    taxa_premio_veiculo: IntervaloReal
+    cancelamento: float = Field(ge=0, le=1)
+
+
 class Parametros(_Modelo):
     pessoas_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
     eventos_por_frete: Intervalo
@@ -209,6 +224,7 @@ class Parametros(_Modelo):
     nucleo: ParametrosNucleo
     rotacerta: ParametrosRotaCerta
     patio: ParametrosPatio
+    apolice: ParametrosApolice
 
 
 class Periodo(_Modelo):
@@ -337,6 +353,7 @@ class Roteiro(_Modelo):
         erros += self._coerencia_do_nucleo()
         erros += self._coerencia_do_rotacerta()
         erros += self._coerencia_do_patio()
+        erros += self._coerencia_do_apolice()
         for nome, evento in self.eventos.items():
             erros += [f"eventos.{nome}: sistema desconhecido '{s}'" for s in evento.sistemas if s not in self.sistemas]
         for nome, defeito in self.defeitos.items():
@@ -539,6 +556,26 @@ class Roteiro(_Modelo):
             f"parametros.patio.clientes_grupo: falta a empresa '{e}'"
             for e in ("mb_viacao", "mb_cargas") if e not in p.clientes_grupo
         ]
+        return erros
+
+    def _coerencia_do_apolice(self) -> list[str]:
+        erros = []
+        p = self.parametros.apolice
+        intervalos = {
+            "horario_expediente": p.horario_expediente, "importancia_segurada": p.importancia_segurada,
+            "taxa_premio": p.taxa_premio, "taxa_premio_veiculo": p.taxa_premio_veiculo,
+        }
+        for nome, intervalo in intervalos.items():
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"parametros.apolice.{nome}.minimo é maior que o máximo")
+        if p.horario_expediente.maximo > 24 or p.horario_expediente.minimo == p.horario_expediente.maximo:
+            erros.append("parametros.apolice.horario_expediente deve ficar entre 0 e 24 h, com fim depois do início")
+        if p.importancia_segurada.minimo < 1 or p.taxa_premio.minimo <= 0 or p.taxa_premio_veiculo.minimo <= 0:
+            erros.append("parametros.apolice: importancia_segurada e taxas de prêmio devem ser positivas")
+        for nome in ("ramos_pf", "ramos_pj"):
+            pesos = getattr(p, nome)
+            if any(v < 0 for v in pesos.values()) or sum(pesos.values()) <= 0:
+                erros.append(f"parametros.apolice.{nome}: pesos devem ser não negativos com soma positiva")
         return erros
 
     def fatia(self, artigo: str) -> Fatia:
