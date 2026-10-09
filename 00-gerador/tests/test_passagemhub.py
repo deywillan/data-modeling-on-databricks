@@ -3,9 +3,9 @@
 Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: as páginas na landing e, nas
 fatias com gabarito, as tabelas do schema `gabarito`.
 
-Para poupar a cota, o módulo usa uma cópia do roteiro em que a fatia 05-raw-vault (com
-gabarito) tem só o *PassagemHub* e a página é pequena, para que cada dia tenha várias
-páginas na escala mínima. As taxas de defeitos são as do roteiro oficial.
+Para poupar a cota, o módulo usa a geração `principal` (ver `geracoes.py`), compartilhada
+com os outros sistemas, cujo roteiro de teste tem a página pequena, para que cada dia tenha
+várias páginas na escala mínima. As taxas de defeitos são as do roteiro oficial.
 """
 
 import json
@@ -13,37 +13,22 @@ import math
 import re
 from collections import defaultdict
 from datetime import date, datetime
-from importlib import resources
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
-import yaml
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.05
-ARTIGO = "05-raw-vault"
+ESCALA = geracoes.PRINCIPAL.escala
 CARGA_INICIAL = date(2025, 12, 31)
 COLUNA_NOVA = date(2026, 1, 5)
-ULTIMO_DIA = date(2026, 1, 7)
-POR_PAGINA = 5
+ULTIMO_DIA = date(2026, 1, 12)
+POR_PAGINA = geracoes.EVENTOS_POR_PAGINA_PASSAGEMHUB
 PADRAO = re.compile(r"passagemhub/eventos_venda/(\d{4}-\d{2}-\d{2})/eventos_venda_(\d{8})_(\d{4})\.json")
 
 
-def _roteiro_de_teste(pasta):
-    dados = yaml.safe_load(
-        resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
-    )
-    dados["fatias"][ARTIGO]["sistemas"] = ["passagemhub"]
-    dados["parametros"]["passagemhub"]["eventos_por_pagina"] = POR_PAGINA
-    caminho = pasta / "roteiro.yaml"
-    caminho.write_text(yaml.safe_dump(dados, allow_unicode=True), encoding="utf-8")
-    return caminho
-
-
 def _arquivos(destino: DestinoLocal) -> dict[str, bytes]:
-    pasta = destino.volume / "passagemhub"
-    return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
+    return geracoes.arquivos(destino, "passagemhub")
 
 
 def _paginas(arquivos: dict[str, bytes]) -> list[tuple[str, dict]]:
@@ -60,23 +45,17 @@ def _eventos(arquivos: dict[str, bytes]) -> list[dict]:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do PassagemHub (a
+    fatia tem outros sistemas)."""
+    return geracoes.gabarito(destino, "passagemhub")
 
 
 @pytest.fixture(scope="module")
-def roteiro(tmp_path_factory):
-    return _roteiro_de_teste(tmp_path_factory.mktemp("roteiro_passagemhub"))
-
-
-@pytest.fixture(scope="module")
-def gerado(spark, tmp_path_factory, roteiro):
-    """Carga inicial e avanço até depois da coluna nova (05/01/2026)."""
-    destino = DestinoLocal(tmp_path_factory.mktemp("passagemhub") / "medalhao_05_raw_vault")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark, roteiro=roteiro)
-    carga = _arquivos(destino)
-    avancar_tempo(ARTIGO, destino, (ULTIMO_DIA - CARGA_INICIAL).days, spark=spark, roteiro=roteiro)
-    return destino, carga, _arquivos(destino), _gabarito(destino)
+def gerado(principal):
+    """Carga inicial e avanço até depois da coluna nova de 05/01/2026 (geração `principal`)."""
+    assert principal.resultados[-1].data_relogio == ULTIMO_DIA
+    destino = principal.final
+    return destino, _arquivos(principal.etapas[0]), _arquivos(destino), _gabarito(destino)
 
 
 def test_paginas_json_aninhado_numeradas_por_dia_simulado(gerado):
@@ -254,11 +233,8 @@ def test_defeitos_do_roteiro_aplicados_por_pedido_e_registrados_no_gabarito(gera
     assert max(r["data_entrega"] for r in gabarito["defeitos"]) > CARGA_INICIAL
 
 
-def test_gerar_em_partes_produz_as_mesmas_paginas(spark, tmp_path, roteiro, gerado):
+@pytest.mark.lento
+def test_gerar_em_partes_produz_as_mesmas_paginas(gerado, principal_em_partes):
     _, _, completo, _ = gerado
-    destino = DestinoLocal(tmp_path / "medalhao_05_raw_vault")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, ate=date(2026, 1, 4), spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 1, spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 2, spark=spark, roteiro=roteiro)
 
-    assert _arquivos(destino) == completo
+    assert _arquivos(principal_em_partes.final) == completo

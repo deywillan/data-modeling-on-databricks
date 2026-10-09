@@ -1,9 +1,11 @@
 """Legados do Expresso Vale do Sol (*SolTicket* e *SolFin*) e a aquisição de 01/07/2025.
 
 Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e as
-tabelas do schema `gabarito`. O módulo usa uma cópia do roteiro com uma fatia dos legados
-junto com o *Embarque* (para a sobreposição de clientes), com gabarito, e taxas mais altas
-que as do Estudo de Caso nos defeitos raros, para medi-los com folga estatística.
+tabelas do schema `gabarito`. O módulo usa a geração `legados` (ver `geracoes.py`): uma
+fatia dos legados junto com o *Embarque* (para a sobreposição de clientes), com gabarito,
+gerada até a segunda-feira 05/01/2026, com taxas mais altas que as do Estudo de Caso nos
+defeitos raros do *SolTicket*, para medi-los com folga estatística. O teste lento compara
+com a `legados_em_partes`, gerada até a véspera da aquisição e avançada uma semana.
 """
 
 import csv
@@ -12,42 +14,19 @@ import math
 import re
 from collections import defaultdict
 from datetime import date, timedelta
-from importlib import resources
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
-import yaml
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.1
-ARTIGO = "99-legados"
-ARTIGO_SO_LEGADOS = "98-legados"
+ESCALA = geracoes.LEGADOS.escala
 AQUISICAO = date(2025, 7, 1)
-CARGA_INICIAL = date(2025, 12, 31)
-DIAS_AVANCADOS = 6  # chega à segunda-feira 05/01/2026
-TAXAS_DE_TESTE = {"pessoa_duplicada_no_sistema": 0.10, "fk_orfa": 0.05, "municipio_fora_do_padrao": 0.10}
+ULTIMO_DIA = date(2026, 1, 5)  # segunda-feira: a primeira foto semanal depois da virada do ano
 ENTIDADES = {
     "solticket": {"clientes": "cod_cliente", "linhas": "cod_linha", "passagens": "num_bilhete"},
     "solfin": {"fornecedores": "cod_fornecedor", "titulos_pagar": "num_titulo"},
 }
-
-
-def _roteiro_de_teste(pasta):
-    dados = yaml.safe_load(
-        resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
-    )
-    for tipo, taxa in TAXAS_DE_TESTE.items():
-        dados["defeitos"][tipo]["taxas"]["solticket"] = taxa
-    dados["fatias"][ARTIGO] = {
-        "catalogo": "medalhao_99_legados", "sistemas": ["embarque", "solticket", "solfin"], "gabarito": True,
-    }
-    dados["fatias"][ARTIGO_SO_LEGADOS] = {
-        "catalogo": "medalhao_98_legados", "sistemas": ["solticket", "solfin"], "gabarito": True,
-    }
-    caminho = pasta / "roteiro.yaml"
-    caminho.write_text(yaml.safe_dump(dados, allow_unicode=True), encoding="utf-8")
-    return caminho
 
 
 def _arquivos(destino: DestinoLocal) -> dict[str, bytes]:
@@ -75,8 +54,7 @@ def _fotos(arquivos: dict[str, bytes], sistema: str) -> dict[date, dict[str, dic
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    return geracoes.gabarito(destino)
 
 
 def _mapa(gabarito, sistema: str, entidade: str) -> dict[int, str]:
@@ -98,20 +76,16 @@ def _datas_esperadas(fim: date) -> list[date]:
 
 
 @pytest.fixture(scope="module")
-def gerado(spark, tmp_path_factory):
-    """Carga inicial da fatia (Embarque + legados) e avanço até a segunda-feira seguinte."""
-    pasta = tmp_path_factory.mktemp("legados")
-    roteiro = _roteiro_de_teste(pasta)
-    destino = DestinoLocal(pasta / "medalhao_99_legados")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark, roteiro=roteiro)
-    carga = _arquivos(destino)
-    avancar_tempo(ARTIGO, destino, DIAS_AVANCADOS, spark=spark, roteiro=roteiro)
-    return destino, roteiro, carga, _arquivos(destino), _gabarito(destino)
+def gerado(legados):
+    """Fatia de Embarque + legados até a segunda-feira 05/01/2026 (geração `legados`)."""
+    assert legados.resultados[-1].data_relogio == ULTIMO_DIA
+    destino = legados.final
+    return destino, legados.roteiro, _arquivos(destino), _gabarito(destino)
 
 
 def test_nada_antes_da_aquisicao_e_depois_uma_foto_por_semana(gerado):
-    _, _, carga, arquivos, _ = gerado
-    fim = CARGA_INICIAL + timedelta(days=DIAS_AVANCADOS)
+    _, _, arquivos, _ = gerado
+    fim = ULTIMO_DIA
     padrao = re.compile(r"(solticket|solfin)/([a-z_]+)/(\d{4}-\d{2}-\d{2})/\2_(\d{8})_0001\.csv")
 
     datas = defaultdict(set)
@@ -124,13 +98,11 @@ def test_nada_antes_da_aquisicao_e_depois_uma_foto_por_semana(gerado):
     for sistema, entidades in ENTIDADES.items():
         for entidade in entidades:
             assert sorted(datas[sistema, entidade]) == _datas_esperadas(fim), (sistema, entidade)
-    assert {date.fromisoformat(c.split("/")[2]) for c in carga} == set(_datas_esperadas(CARGA_INICIAL))
-    assert {c: v for c, v in arquivos.items() if c in carga} == carga, "o avanço não muda a carga inicial"
-    assert date(2026, 1, 5) in datas["solticket", "passagens"], "o avancar_tempo também entrega a foto semanal"
+    assert ULTIMO_DIA in datas["solticket", "passagens"]
 
 
 def test_a_carga_historica_inteira_chega_no_dia_da_aquisicao(gerado):
-    _, roteiro, _, arquivos, _ = gerado
+    _, roteiro, arquivos, _ = gerado
     historica = _fotos(arquivos, "solticket")[AQUISICAO]["passagens"]
     vendas = sorted(date.fromisoformat(p["data_hora_venda"][:10]) for p in historica.values())
     assert vendas[0] < date(2024, 1, 15), "a carga histórica começa no início da história"
@@ -145,7 +117,7 @@ def test_a_carga_historica_inteira_chega_no_dia_da_aquisicao(gerado):
 
 
 def test_os_arquivos_sao_csv_ponto_e_virgula_em_latin1(gerado):
-    _, _, _, arquivos, _ = gerado
+    _, _, arquivos, _ = gerado
     com_acento = set()
     for caminho, conteudo in arquivos.items():
         sistema, entidade = caminho.split("/")[:2]
@@ -160,7 +132,7 @@ def test_os_arquivos_sao_csv_ponto_e_virgula_em_latin1(gerado):
 
 
 def test_latin1_registrado_por_arquivo_no_gabarito(gerado):
-    _, _, _, arquivos, gabarito = gerado
+    _, _, arquivos, gabarito = gerado
     registros = [r for r in gabarito["defeitos"] if r["tipo"] == "encoding_latin1"]
     assert all(r["granularidade"] == "arquivo" for r in registros)
     assert all(r["data_entrega"].isoformat() == r["arquivo"].split("/")[2] for r in registros)
@@ -169,7 +141,7 @@ def test_latin1_registrado_por_arquivo_no_gabarito(gerado):
 
 
 def test_fotos_semanais_completas_com_as_mudancas_do_periodo(gerado):
-    _, _, _, arquivos, _ = gerado
+    _, _, arquivos, _ = gerado
     for sistema, entidade, situacao, transicoes, criacao in (
         ("solticket", "passagens", "situacao", {("emitida", "cancelada"), ("emitida", "utilizada")}, "data_hora_venda"),
         ("solfin", "titulos_pagar", "situacao", {("aberto", "pago")}, "data_emissao"),
@@ -191,7 +163,7 @@ def test_fotos_semanais_completas_com_as_mudancas_do_periodo(gerado):
 
 
 def test_clientes_do_vale_do_sol_se_sobrepoem_aos_do_embarque_com_outra_chave(gerado):
-    _, _, _, arquivos, gabarito = gerado
+    _, _, arquivos, gabarito = gerado
     solticket = _mapa(gabarito, "solticket", "clientes")
     embarque = _mapa(gabarito, "embarque", "clientes")
     clientes_evs = {
@@ -221,7 +193,7 @@ def _dentro_da_tolerancia(observados: int, populacao: int, taxa: float) -> bool:
 
 
 def test_defeitos_do_solticket_aparecem_na_taxa_do_roteiro_e_estao_registrados(gerado):
-    _, roteiro, _, arquivos, gabarito = gerado
+    _, roteiro, arquivos, gabarito = gerado
     defeitos = carregar_roteiro(roteiro).defeitos
     taxas = {tipo: d.taxas.get("solticket") for tipo, d in defeitos.items()}
     fotos = _fotos(arquivos, "solticket")
@@ -274,11 +246,14 @@ def test_defeitos_do_solticket_aparecem_na_taxa_do_roteiro_e_estao_registrados(g
             f"{tipo}: {len(observados[tipo])}/{populacao}")
 
 
-def test_gerar_em_partes_produz_as_mesmas_fotos_e_nada_antes_da_aquisicao(spark, tmp_path, gerado):
-    _, roteiro, _, completo, _ = gerado
-    destino = DestinoLocal(tmp_path / "medalhao_98_legados")
-    gerar_fatia(ARTIGO_SO_LEGADOS, destino, escala=ESCALA, ate=AQUISICAO - timedelta(days=1), spark=spark, roteiro=roteiro)
-    assert _arquivos(destino) == {}, "nada dos legados antes da aquisição"
-    avancar_tempo(ARTIGO_SO_LEGADOS, destino, 7, spark=spark, roteiro=roteiro)
+@pytest.mark.lento
+def test_gerar_em_partes_produz_as_mesmas_fotos_e_nada_antes_da_aquisicao(gerado, legados_em_partes):
+    """Carga até a véspera da aquisição (nada dos legados) e avanço de uma semana: o
+    `avancar_tempo` entrega a carga histórica e a foto semanal seguinte."""
+    _, _, completo, _ = gerado
+    vespera, uma_semana = legados_em_partes.etapas
+    assert legados_em_partes.resultados[0].data_relogio == AQUISICAO - timedelta(days=1)
+    assert _arquivos(vespera) == {}, "nada dos legados antes da aquisição"
 
-    assert _arquivos(destino) == {c: v for c, v in completo.items() if c.split("/")[2] <= "2025-07-07"}
+    assert _arquivos(uma_semana) == {c: v for c, v in completo.items() if c.split("/")[2] <= "2025-07-07"}
+    assert {c.split("/")[2] for c in _arquivos(uma_semana)} == {"2025-07-01", "2025-07-07"}

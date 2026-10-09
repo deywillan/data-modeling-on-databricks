@@ -1,43 +1,29 @@
 """*Rastro* (telemetria da holding): muitos arquivos pequenos de JSON aninhado na landing.
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam. Para ter gabarito sem gerar
-os outros sistemas (caro), o módulo usa uma cópia do roteiro em que a fatia `09-obt` tem
-só o *Rastro* e grava o gabarito.
+Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam. Usa a geração `principal`
+(ver `geracoes.py`), compartilhada com os outros sistemas, cuja fatia de teste tem gabarito
+e a janela de telemetria de 90 dias do Estudo de Caso.
 """
 
 import json
 import re
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
-from importlib import resources
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
-import yaml
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.01  # 4 veículos na frota própria
-ARTIGO = "09-obt"
+ESCALA = geracoes.PRINCIPAL.escala  # 20 veículos na frota própria
 CARGA_INICIAL = date(2025, 12, 31)
 JANELA_DIAS = 90  # janela de telemetria da carga inicial (Estudo de Caso)
-DIAS_AVANCADOS = 3  # cobre o maior atraso de evento do roteiro (3 dias)
+DIAS_AVANCADOS = 12  # cobre o maior atraso de evento do roteiro (3 dias)
 ARQUIVO = re.compile(r"rastro/eventos/(\d{4}-\d{2}-\d{2})/eventos_(\d{8})_(\d{4})\.json")
 
 
-def _roteiro_de_teste(pasta):
-    dados = yaml.safe_load(
-        resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
-    )
-    dados["fatias"][ARTIGO].update(sistemas=["rastro"], gabarito=True)
-    caminho = pasta / "roteiro.yaml"
-    caminho.write_text(yaml.safe_dump(dados, allow_unicode=True), encoding="utf-8")
-    return caminho
-
-
 def _arquivos(destino: DestinoLocal) -> dict[str, bytes]:
-    pasta = destino.volume / "rastro"
-    return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
+    return geracoes.arquivos(destino, "rastro")
 
 
 def _eventos(arquivos: dict[str, bytes]) -> list[dict]:
@@ -54,20 +40,17 @@ def _ts(evento: dict) -> datetime:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    return geracoes.gabarito(destino, "rastro")
 
 
 @pytest.fixture(scope="module")
-def gerado(spark, tmp_path_factory):
-    """Carga inicial do `09-obt` (só *Rastro*, com gabarito) e avanço de alguns dias."""
-    pasta = tmp_path_factory.mktemp("rastro")
-    roteiro = _roteiro_de_teste(pasta)
-    destino = DestinoLocal(pasta / "medalhao_09_obt")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark, roteiro=roteiro)
-    carga = _arquivos(destino)
-    avancar_tempo(ARTIGO, destino, DIAS_AVANCADOS, spark=spark, roteiro=roteiro)
-    return destino, carga, _arquivos(destino), _gabarito(destino), carregar_roteiro(roteiro)
+def gerado(principal):
+    """Carga inicial e avanço de 12 dias (geração `principal`)."""
+    roteiro = carregar_roteiro(principal.roteiro)
+    assert roteiro.fatia(geracoes.PRINCIPAL.artigo).janela_telemetria_dias == JANELA_DIAS
+    assert principal.resultados[-1].data_relogio == CARGA_INICIAL + timedelta(days=DIAS_AVANCADOS)
+    destino = principal.final
+    return destino, _arquivos(principal.etapas[0]), _arquivos(destino), _gabarito(destino), roteiro
 
 
 def test_carga_inicial_traz_so_os_ultimos_90_dias_de_telemetria(gerado):

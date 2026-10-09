@@ -9,21 +9,14 @@ import io
 import re
 from types import SimpleNamespace
 
+import geracoes
 import pytest
 from databricks.sdk.errors import AlreadyExists, NotFound
 
-from modelbricks_gerador import DestinoUC, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoUC, gerar_fatia
 
-
-def _roteiro_so_ibge():
-    """A fatia 01-bronze reduzida ao IBGE: o falso não executa Spark, e o que se testa aqui
-    é só onde o destino grava, não a geração dos sistemas."""
-    roteiro = carregar_roteiro()
-    fatia = roteiro.fatias["01-bronze"].model_copy(update={"sistemas": ["ibge"]})
-    return roteiro.model_copy(update={"fatias": {**roteiro.fatias, "01-bronze": fatia}})
-
-
-_SO_IBGE = _roteiro_so_ibge()
+# O falso não executa Spark, e o que se testa aqui é só onde o destino grava.
+_SO_IBGE = geracoes.roteiro_so_ibge()
 
 
 class _UnityCatalogFalso:

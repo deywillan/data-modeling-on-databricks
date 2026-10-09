@@ -4,7 +4,8 @@ fronteira do primeiro destino (nada em `bronze`, `silver` ou `gold`).
 
 Para poupar a cota, a fatia é gerada só duas vezes no módulo: no destino A (carga
 inicial, segunda chamada sem reset e avanço de 1 dia) e no destino B, cópia da carga de A
-recriada com `reset=True`, o que também compara duas gerações independentes.
+recriada com `reset=True`, o que também compara duas gerações independentes. É o teste de
+marco do ticket 10 (fatia oficial inteira), por isso marcado como `lento`.
 """
 
 import csv
@@ -17,6 +18,8 @@ from pathlib import Path
 import pytest
 
 from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+
+pytestmark = pytest.mark.lento
 
 ARTIGO = "01-bronze"
 ESCALA = 0.01  # escala mínima: estes testes não olham volumes
