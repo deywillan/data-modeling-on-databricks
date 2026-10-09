@@ -23,24 +23,31 @@ reentrega) não se aplicam a fotos.
 Formatos: `csv` (vírgula, UTF-8) e `csv_latin1` (ponto e vírgula, latin1). Com latin1, um
 caractere fora dele faz a serialização falhar.
 
-Interface: `datas_de_snapshot(agenda, inicio_historia, fim)` e
-`entrega_snapshot(sistema, historicos, datas, inicio, fim, formato)`. Nada aqui conhece
-um sistema específico; o *Pátio* e os legados usam o mesmo motor.
+As linhas vêm do Spark em fluxo, ordenadas por data, e cada foto vira bytes assim que
+termina, para que cargas grandes (a carga histórica do *SolTicket*) não precisem caber
+inteiras na memória do driver como linhas.
+
+Interface: `datas_de_snapshot(agenda, inicio_historia, fim)`,
+`entrega_snapshot(sistema, historicos, datas, inicio, fim, formato)` e
+`registrar_por_arquivo(entrega, defeitos, tipo, spark)` (defeito de arquivo inteiro, como o
+`latin1`, registrado em cada arquivo). Nada aqui conhece um sistema específico; o *Pátio*
+e os legados usam o mesmo motor.
 """
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import date, timedelta
 from functools import reduce
 from typing import TYPE_CHECKING
 
 from .cdc import Mudancas
-from .defeitos import ANOTACAO, registros, tabela_de_registros
+from .defeitos import ANOTACAO, Defeitos, registros, tabela_de_registros
 from .escritor import Arquivo, caminho_landing
 from .roteiro import AgendaSnapshots
 from .sistemas.base import Entrega, Lote
 
 if TYPE_CHECKING:
-    from pyspark.sql import DataFrame
+    from pyspark.sql import DataFrame, SparkSession
 
 FORMATOS = {"csv": (",", "utf-8"), "csv_latin1": (";", "latin-1")}
 
@@ -81,10 +88,22 @@ def entrega_snapshot(
     for h in historicos:
         cabecalhos[h.entidade], parte = _fotos(h, calendario, inicio, fim, separador)
         partes.append(parte)
-    tabela = reduce(lambda a, b: a.unionByName(b), partes).orderBy("data", "entidade", "_n").toArrow()
-    defeitos = tabela_de_registros(spark, registros(tabela, sistema, seq_coluna=None))
-    lotes = _separar(sistema, tabela, no_intervalo, cabecalhos, separador, encoding, formato)
+    linhas = reduce(lambda a, b: a.unionByName(b), partes).orderBy("data", "entidade", "_n")
+    lotes, anotadas = _lotes(sistema, linhas, no_intervalo, cabecalhos, separador, encoding, formato)
+    defeitos = tabela_de_registros(spark, registros(_tabela_de_anotadas(anotadas), sistema, seq_coluna=None))
     return Entrega(lotes=lotes, defeitos=[defeitos] if defeitos is not None else [])
+
+
+def registrar_por_arquivo(entrega: Entrega, defeitos: Defeitos, tipo: str, spark: "SparkSession") -> Entrega:
+    """A entrega com o defeito de arquivo inteiro `tipo` (ex.: `encoding_latin1`) registrado
+    em cada arquivo entregue, quando o roteiro dá ao sistema a taxa `arquivo`."""
+    if defeitos.taxa(tipo) != "arquivo" or not entrega.lotes:
+        return entrega
+    linhas = [
+        defeitos.linha_agregada(tipo, lote.entidade, lote.data_simulada, arquivo=lote.arquivo.caminho)
+        for lote in entrega.lotes
+    ]
+    return replace(entrega, defeitos=[*entrega.defeitos, tabela_de_registros(spark, linhas)])
 
 
 def _fotos(historico: Mudancas, calendario: "DataFrame", inicio: date, fim: date, separador: str):
@@ -133,23 +152,49 @@ def _fotos(historico: Mudancas, calendario: "DataFrame", inicio: date, fim: date
     return colunas, linhas
 
 
-def _separar(sistema, tabela, datas, cabecalhos, separador, encoding, formato) -> list[Lote]:
-    """Um lote por data e entidade (na ordem dos históricos), mesmo sem linhas."""
-    grupos: dict[tuple[str, str], list[str]] = {}
-    for data, entidade, linha in zip(
-        tabela.column("data").to_pylist(), tabela.column("entidade").to_pylist(), tabela.column("linha").to_pylist()
-    ):
-        grupos.setdefault((data, entidade), []).append(linha)
-    lotes = []
-    for data_foto in datas:
-        for entidade, colunas in cabecalhos.items():
-            linhas = grupos.get((data_foto.isoformat(), entidade), [])
-            conteudo = "".join(f"{linha}\n" for linha in [separador.join(colunas), *linhas])
-            arquivo = Arquivo(
-                caminho_landing(sistema, entidade, data_foto, "csv"), conteudo.encode(encoding, errors="strict")
-            )
-            lotes.append(Lote(sistema, entidade, data_foto, formato, len(linhas), arquivo))
-    return lotes
+def _lotes(sistema, linhas: "DataFrame", datas, cabecalhos, separador, encoding, formato):
+    """Um lote por data e entidade (na ordem dos históricos), mesmo sem linhas.
+
+    As linhas chegam em fluxo, ordenadas por data (`toLocalIterator`), e cada data vira bytes
+    assim que termina: a memória guarda uma foto por vez além dos arquivos prontos, e não
+    todas as fotos do intervalo. Devolve também as linhas com anotação de defeito.
+    """
+    lotes, anotadas = [], []
+    pendentes = iter(datas)
+    atual: str | None = None
+    grupos: dict[str, list[str]] = {}
+
+    def fechar(ate: str | None) -> None:
+        """Gera os lotes das datas pendentes até `ate` (inclusive; `None` = todas)."""
+        for data_foto in pendentes:
+            for entidade, colunas in cabecalhos.items():
+                linhas_ = grupos.get(entidade, []) if data_foto.isoformat() == atual else []
+                conteudo = "".join(f"{linha}\n" for linha in [separador.join(colunas), *linhas_])
+                arquivo = Arquivo(
+                    caminho_landing(sistema, entidade, data_foto, "csv"), conteudo.encode(encoding, errors="strict")
+                )
+                lotes.append(Lote(sistema, entidade, data_foto, formato, len(linhas_), arquivo))
+            if data_foto.isoformat() == ate:
+                return
+
+    for data, entidade, _, linha, anotacoes in linhas.toLocalIterator():
+        if data != atual:
+            if atual is not None:
+                fechar(atual)
+            atual, grupos = data, {}
+        grupos.setdefault(entidade, []).append(linha)
+        if anotacoes:
+            anotadas.append({"data": data, "entidade": entidade, "_defeitos": [a.asDict() for a in anotacoes]})
+    fechar(None)
+    return lotes, anotadas
 
 
-__all__ = ["FORMATOS", "datas_de_snapshot", "entrega_snapshot"]
+def _tabela_de_anotadas(anotadas: list[dict]):
+    import pyarrow as pa
+
+    if not anotadas:
+        return pa.table({"data": pa.array([], pa.string()), "entidade": pa.array([], pa.string())})
+    return pa.Table.from_pylist(anotadas)
+
+
+__all__ = ["FORMATOS", "datas_de_snapshot", "entrega_snapshot", "registrar_por_arquivo"]
