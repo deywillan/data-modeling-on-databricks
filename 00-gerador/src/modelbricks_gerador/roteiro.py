@@ -145,6 +145,7 @@ class Defeito(_Modelo):
     descricao: str
     taxas: dict[str, float | Literal["arquivo", "coluna"]]
     artigos: list[int]
+    atraso_dias: Intervalo | None = None  # defeitos de entrega: dias até a linha chegar
 
 
 class Fatia(_Modelo):
@@ -200,6 +201,9 @@ class Roteiro(_Modelo):
                     erros.append(f"defeitos.{nome}: sistema desconhecido '{sistema}'")
                 if isinstance(taxa, float) and not 0 <= taxa <= 1:
                     erros.append(f"defeitos.{nome}.taxas.{sistema}: taxa {taxa} fora de 0 a 1")
+            atraso = defeito.atraso_dias
+            if atraso is not None and not 1 <= atraso.minimo <= atraso.maximo:
+                erros.append(f"defeitos.{nome}.atraso_dias: é preciso 1 <= minimo <= maximo")
         for artigo, fatia in self.fatias.items():
             casamento = _ARTIGO.match(artigo)
             if not casamento:

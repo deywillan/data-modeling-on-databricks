@@ -38,8 +38,9 @@ class Destino(Protocol):
     def ler(self, caminho: str) -> bytes:
         """Conteúdo de um arquivo da landing."""
 
-    def gravar_gabarito(self, tabela: str, df: "DataFrame") -> None:
-        """Grava (substituindo) uma tabela no schema `gabarito`."""
+    def gravar_gabarito(self, tabela: str, df: "DataFrame", acrescentar: bool = False) -> None:
+        """Grava uma tabela no schema `gabarito`, substituindo-a (padrão) ou, com
+        `acrescentar`, somando as linhas às que já existem."""
 
 
 class DestinoLocal:
@@ -80,14 +81,15 @@ class DestinoLocal:
     def ler(self, caminho: str) -> bytes:
         return self._caminho(caminho).read_bytes()
 
-    def gravar_gabarito(self, tabela: str, df: "DataFrame") -> None:
+    def gravar_gabarito(self, tabela: str, df: "DataFrame", acrescentar: bool = False) -> None:
         import pyarrow.parquet as pq
 
         pasta = self.raiz / "gabarito" / tabela
-        if pasta.exists():
+        if pasta.exists() and not acrescentar:
             shutil.rmtree(pasta)
-        pasta.mkdir(parents=True)
-        pq.write_table(df.toArrow(), pasta / "parte-0000.parquet")
+        pasta.mkdir(parents=True, exist_ok=True)
+        parte = len(list(pasta.glob("parte-*.parquet")))
+        pq.write_table(df.toArrow(), pasta / f"parte-{parte:04d}.parquet")
 
     def _caminho(self, relativo: str) -> Path:
         alvo = (self.volume / relativo).resolve()

@@ -13,14 +13,22 @@ mudanças posteriores de uma passagem (remarcação, cancelamento, utilização)
 na venda. Para gerar um intervalo qualquer, a projeção reconstrói as vendas desde o dia
 mais antigo que ainda pode ter mudança no intervalo e entrega só as operações do intervalo.
 Números (volumes, taxas, datas) vêm do `roteiro.yaml`.
+
+Defeitos (`defeitos.py`), aplicados só quando o roteiro dá taxa ao *Embarque*: pessoa
+duplicada, CPF fora do padrão, nome abreviado e contato nulo nos `clientes`; FK órfã
+(`cod_linha` inexistente) nas `passagens`; evento atrasado e CDC duplicado (reentrega) em
+todas as entidades. O roteiro do Estudo de Caso só ativa o CDC duplicado.
 """
 
 from datetime import date, timedelta
 from functools import cached_property
 from typing import TYPE_CHECKING
 
-from ..cdc import Mudancas, lotes_cdc
+from dataclasses import replace
+
+from ..cdc import Mudancas, entrega_cdc
 from ..chaves import chave_do_sistema, mapa
+from ..defeitos import Alvo, Defeitos
 from ..mundo import linhas as linhas_na_escala
 from .base import Contexto, Entrega, calendario, materializar
 
@@ -32,14 +40,20 @@ EVENTO_REAJUSTE = "reajuste_tarifas_embarque"
 _SEGUNDOS_DIA = 86400
 
 
+# Margem de ids (acima de qualquer id verdadeiro) para chaves que não existem no mundo:
+# cópias duplicadas de clientes e linhas inexistentes das FKs órfãs.
+_FORA_DO_MUNDO_CLIENTES = 50_000_000
+_FORA_DO_MUNDO_LINHAS = 50_000
+
+
 def projetar(contexto: Contexto, inicio: date, fim: date) -> Entrega:
     projecao = _Projecao(contexto, fim)
     mudancas = [
-        Mudancas("clientes", ("id_cliente",), projecao.mudancas_clientes()),
-        Mudancas("tarifas", ("id_tarifa",), projecao.mudancas_tarifas()),
-        Mudancas("passagens", ("id_passagem",), projecao.mudancas_passagens(inicio)),
+        Mudancas("clientes", ("id_cliente",), projecao.sujar_clientes(projecao.mudancas_clientes())),
+        Mudancas("tarifas", ("id_tarifa",), projecao.sujar_entrega(projecao.mudancas_tarifas(), Alvo("tarifas", ("id_tarifa",)))),
+        Mudancas("passagens", ("id_passagem",), projecao.sujar_passagens(projecao.mudancas_passagens(inicio))),
     ]
-    return Entrega(lotes=lotes_cdc(SISTEMA, mudancas, inicio, fim), mapa_chaves=projecao.mapa_chaves())
+    return replace(entrega_cdc(SISTEMA, mudancas, inicio, fim), mapa_chaves=projecao.mapa_chaves())
 
 
 class _Projecao:
@@ -50,6 +64,7 @@ class _Projecao:
         self.fim = fim
         self.reajuste = contexto.roteiro.eventos[EVENTO_REAJUSTE]
         self.empresa = contexto.roteiro.sistemas[SISTEMA].empresa
+        self.defeitos = Defeitos(contexto.roteiro, SISTEMA)
 
     def chave(self, entidade: str, coluna_id: str, digitos: int) -> str:
         return chave_do_sistema(self.roteiro.seed_base, SISTEMA, entidade, coluna_id, digitos)
@@ -92,6 +107,27 @@ class _Projecao:
             .unionByName(mapa(linhas_, SISTEMA, "tarifas", "cod_linha", "rotas", "id_rota"))
         )
 
+    # -- defeitos ---------------------------------------------------------------------------
+
+    def sujar_clientes(self, df: "DataFrame") -> "DataFrame":
+        d = self.defeitos
+        alvo = Alvo("clientes", ("id_cliente",), "pessoas", "_id_verdadeiro")
+        copia = self.chave("clientes", f"(_id_verdadeiro + {_FORA_DO_MUNDO_CLIENTES})", 8)
+        df = d.pessoa_duplicada_no_sistema(df, alvo, {"id_cliente": copia})
+        df = d.cpf_fora_do_padrao(df, alvo, "cpf")
+        df = d.nome_abreviado_ou_com_erro(df, alvo, "nome")
+        df = d.contato_nulo(df, alvo, ("email", "telefone"))
+        return self.sujar_entrega(df, alvo)
+
+    def sujar_passagens(self, df: "DataFrame") -> "DataFrame":
+        alvo = Alvo("passagens", ("id_passagem",))
+        inexistente = self.chave(
+            "linhas", f"({_FORA_DO_MUNDO_LINHAS} + pmod(xxhash64(id_passagem), {_FORA_DO_MUNDO_LINHAS - 1}))", 5)
+        return self.sujar_entrega(self.defeitos.fk_orfa(df, alvo, "cod_linha", inexistente), alvo)
+
+    def sujar_entrega(self, df: "DataFrame", alvo: Alvo) -> "DataFrame":
+        return self.defeitos.cdc_duplicado(self.defeitos.evento_atrasado(df, alvo), alvo)
+
     # -- mudanças por entidade ------------------------------------------------------------
 
     def mudancas_clientes(self) -> "DataFrame":
@@ -101,7 +137,7 @@ class _Projecao:
             self.clientes
             .join(calendario(self.contexto, SISTEMA, self.fim).withColumnRenamed("data", "data_cadastro"), "data_cadastro")
             .selectExpr(
-                "id_cliente", "'I' AS op",
+                "id_cliente", "id_pessoa AS _id_verdadeiro", "'I' AS op",
                 f"timestamp_seconds(unix_seconds(cast(data_cadastro AS timestamp)) "
                 f"+ pmod(xxhash64(semente, id_pessoa), {antes_das_vendas})) AS ts_operacao",
                 "nome", "cpf", "data_nascimento", "email", "telefone", "cod_municipio", "data_cadastro",
@@ -168,7 +204,10 @@ class _Projecao:
         from pyspark.sql import functions as F
 
         p, datas = self.p, self.roteiro.datas
-        defasagem = p.antecedencia_compra_dias.maximo + p.adiamento_remarcacao_dias.maximo + 1
+        # Folga dos defeitos de entrega: linhas de dias anteriores que chegam no intervalo.
+        defasagem = (
+            p.antecedencia_compra_dias.maximo + p.adiamento_remarcacao_dias.maximo + 1 + self.defeitos.folga_dias()
+        )
         primeira_venda = max(datas.inicio, inicio - timedelta(days=defasagem))
 
         # Passagens por dia: o volume do roteiro dividido pelos dias da história.

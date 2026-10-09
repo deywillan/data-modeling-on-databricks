@@ -6,6 +6,7 @@ fatias com gabarito, as tabelas do schema `gabarito`.
 
 import json
 import re
+from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -25,14 +26,22 @@ def _arquivos_embarque(destino: DestinoLocal) -> dict[str, bytes]:
     return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
 
 
-def _operacoes(arquivos: dict[str, bytes]) -> list[dict]:
-    """Todas as operações, com a entidade e a data do lote, em ordem de `seq`."""
-    operacoes = []
+def _linhas(arquivos: dict[str, bytes]) -> list[dict]:
+    """Todas as linhas entregues (reentregas inclusive), com a entidade e a data do lote."""
+    linhas = []
     for caminho, conteudo in arquivos.items():
         _, entidade, data_lote, _ = caminho.split("/")
         for linha in conteudo.decode("utf-8").splitlines():
-            operacoes.append({**json.loads(linha), "_entidade": entidade, "_lote": date.fromisoformat(data_lote)})
-    return sorted(operacoes, key=lambda o: o["seq"])
+            linhas.append({**json.loads(linha), "_entidade": entidade, "_lote": date.fromisoformat(data_lote)})
+    return sorted(linhas, key=lambda o: (o["seq"], o["_lote"]))
+
+
+def _operacoes(arquivos: dict[str, bytes]) -> list[dict]:
+    """Operações em ordem de `seq`, sem as reentregas (o consumidor descarta a `seq` repetida)."""
+    unicas: dict[int, dict] = {}
+    for linha in _linhas(arquivos):
+        unicas.setdefault(linha["seq"], linha)
+    return list(unicas.values())
 
 
 def _aplicar(operacoes: list[dict], ate: date | None = None) -> dict[str, dict]:
@@ -66,7 +75,8 @@ def com_gabarito(spark, tmp_path_factory):
 
 
 def test_lotes_cdc_chegam_um_arquivo_json_por_entidade_e_dia_simulado(com_gabarito):
-    _, carga, _ = com_gabarito
+    destino, carga, _ = com_gabarito
+    reentregues = {r["seq"] for r in _gabarito(destino)["defeitos"] if r["tipo"] == "cdc_duplicado"}
     padrao = re.compile(r"embarque/(clientes|tarifas|passagens)/(\d{4}-\d{2}-\d{2})/\1_(\d{8})_0001\.json")
 
     assert {c.split("/")[1] for c in carga} == set(ENTIDADES)
@@ -78,17 +88,19 @@ def test_lotes_cdc_chegam_um_arquivo_json_por_entidade_e_dia_simulado(com_gabari
         assert date(2024, 1, 1) <= data_lote <= CARGA_INICIAL
         for linha in conteudo.decode("utf-8").splitlines():
             registro = json.loads(linha)
-            assert datetime.fromisoformat(registro["ts_operacao"]).date() == data_lote
+            if registro["seq"] not in reentregues:  # a reentrega chega dias depois da operação
+                assert datetime.fromisoformat(registro["ts_operacao"]).date() == data_lote
     dias_de_passagens = {c.split("/")[2] for c in carga if c.startswith("embarque/passagens/")}
     assert len(dias_de_passagens) > 600, "vendas espalhadas pelos dois anos de história"
 
 
 def test_todo_u_e_d_refere_se_a_chave_inserida_antes_e_seq_e_unica(com_gabarito):
-    _, _, arquivos = com_gabarito
+    destino, _, arquivos = com_gabarito
     operacoes = _operacoes(arquivos)
+    reentregues = {r["seq"] for r in _gabarito(destino)["defeitos"] if r["tipo"] == "cdc_duplicado"}
 
-    seqs = [o["seq"] for o in operacoes]
-    assert len(set(seqs)) == len(seqs), "seq repetida"
+    repetidas = Counter(o["seq"] for o in _linhas(arquivos))
+    assert {s for s, n in repetidas.items() if n > 1} == reentregues, "seq repetida só nas reentregas registradas"
     vivas: dict[str, set] = {entidade: set() for entidade in ENTIDADES}
     excluidas: dict[str, set] = {entidade: set() for entidade in ENTIDADES}
     for op in operacoes:
@@ -201,3 +213,15 @@ def test_gerar_sistema_ou_dia_isoladamente_produz_o_mesmo_conteudo(spark, tmp_pa
 
     assert isolado == {c: v for c, v in completo.items() if c.split("/")[2] <= "2026-01-06"}
     assert {c: v for c, v in isolado.items() if c.split("/")[2] <= "2025-12-31"} == carga
+
+
+def test_roteiro_do_estudo_de_caso_so_reentrega_cdc_no_embarque_na_taxa_do_roteiro(com_gabarito):
+    destino, _, arquivos = com_gabarito
+    defeitos = _gabarito(destino)["defeitos"]
+    taxa = carregar_roteiro().defeitos["cdc_duplicado"].taxas["embarque"]
+    linhas = _linhas(arquivos)
+    unicas = len({o["seq"] for o in linhas})
+
+    assert {(r["sistema"], r["tipo"]) for r in defeitos} == {("embarque", "cdc_duplicado")}
+    assert len(defeitos) == len(linhas) - unicas
+    assert abs(len(defeitos) / unicas - taxa) <= 4 * (taxa * (1 - taxa) / unicas) ** 0.5

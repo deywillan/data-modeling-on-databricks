@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .chaves import COLUNAS_MAPA
+from .defeitos import COLUNAS_DEFEITOS, ESQUEMA
 from .destino import Destino
 from .relogio import Relogio, gravar_relogio, ler_relogio
 from .roteiro import Roteiro, carregar_roteiro
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 
 SCHEMAS_MEDALHAO = ("landing", "bronze", "silver", "gold")
 TABELA_MAPA_CHAVES = "mapa_chaves"  # gabarito: chave verdadeira → chave em cada sistema
+TABELA_DEFEITOS = "defeitos"  # gabarito: cada defeito injetado nos dados da landing
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,7 @@ def gerar_fatia(
         if mapas:
             mapa = reduce(lambda a, b: a.unionByName(b), mapas)
             destino.gravar_gabarito(TABELA_MAPA_CHAVES, mapa.orderBy(*COLUNAS_MAPA))
+        _gravar_defeitos(contexto, entregas, destino, acrescentar=False)
     gravar_relogio(destino, Relogio(ate, artigo, float(escala), roteiro.versao))
     return _concluir(
         Resultado(
@@ -116,7 +119,10 @@ def avancar_tempo(
     inicio = relogio.data_simulada + timedelta(days=1)
     fim = relogio.data_simulada + timedelta(days=dias)
     contexto = Contexto(_sessao(spark, roteiro), roteiro, fatia, relogio.escala, carga_inicial=False)
-    arquivos = sum(len(e.lotes) for e in _projetar(contexto, inicio, fim, destino))
+    entregas = _projetar(contexto, inicio, fim, destino)
+    arquivos = sum(len(e.lotes) for e in entregas)
+    if fatia.gabarito:
+        _gravar_defeitos(contexto, entregas, destino, acrescentar=True)
     gravar_relogio(destino, Relogio(fim, artigo, relogio.escala, roteiro.versao))
     return _concluir(
         Resultado(
@@ -138,6 +144,19 @@ def _projetar(contexto: Contexto, inicio: date, fim: date, destino: Destino) -> 
         destino.gravar_arquivos(lote.arquivo for lote in entrega.lotes)
         entregas.append(entrega)
     return entregas
+
+
+def _gravar_defeitos(contexto: Contexto, entregas: list[Entrega], destino: Destino, acrescentar: bool) -> None:
+    """Grava os defeitos das entregas em `gabarito.defeitos`. Na carga inicial a tabela é
+    criada mesmo sem defeitos; no `avancar_tempo`, só os dos dias novos são acrescentados."""
+    partes = [df for e in entregas for df in e.defeitos]
+    if not partes:
+        if acrescentar:
+            return
+        partes = [contexto.spark.createDataFrame([], ESQUEMA)]
+    defeitos = reduce(lambda a, b: a.unionByName(b), partes).select(*COLUNAS_DEFEITOS)
+    ordem = ("sistema", "entidade", "data_entrega", "tipo", "chave_sistema", "seq", "coluna", "arquivo")
+    destino.gravar_gabarito(TABELA_DEFEITOS, defeitos.orderBy(*ordem), acrescentar=acrescentar)
 
 
 def _roteiro(roteiro: Roteiro | str | Path | None) -> Roteiro:

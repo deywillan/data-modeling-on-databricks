@@ -57,8 +57,8 @@ class Entrega:
     """Resultado de uma projeção num intervalo de datas.
 
     - `lotes`: arquivos da landing, em ordem determinística;
-    - `defeitos`: DataFrames com o registro dos defeitos injetados (gravados em
-      `gabarito.defeitos`); vazio enquanto o sistema não injeta defeitos;
+    - `defeitos`: DataFrames no esquema `defeitos.ESQUEMA` com o registro dos defeitos que
+      aparecem nos lotes desta entrega (gravados em `gabarito.defeitos`); vazio se não há;
     - `mapa_chaves`: DataFrame no esquema de `chaves.COLUNAS_MAPA` (chave verdadeira →
       chave do sistema), gravado em `gabarito.mapa_chaves`; `None` se o sistema não tem
       entidades do mundo verdadeiro.

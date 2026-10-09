@@ -101,8 +101,8 @@ class DestinoUC:
     def ler(self, caminho: str) -> bytes:
         return self.workspace.files.download(f"{self.volume}/{caminho}").contents.read()
 
-    def gravar_gabarito(self, tabela: str, df: "DataFrame") -> None:
-        df.write.mode("overwrite").saveAsTable(f"{self.schema('gabarito')}.{tabela}")
+    def gravar_gabarito(self, tabela: str, df: "DataFrame", acrescentar: bool = False) -> None:
+        df.write.mode("append" if acrescentar else "overwrite").saveAsTable(f"{self.schema('gabarito')}.{tabela}")
 
     # --- onde as coisas ficam ---------------------------------------------------------
 

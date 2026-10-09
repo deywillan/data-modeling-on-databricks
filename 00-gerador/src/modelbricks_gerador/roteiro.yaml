@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 2
+versao: 3
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -137,7 +137,8 @@ eventos:
     parametros: {percentual: 0.085}              # todas as tarifas sobem 8,5%
 
 # Catálogo de defeitos: taxa por sistema (fração de 0 a 1, ou `arquivo`/`coluna` quando o
-# defeito atinge o arquivo ou a coluna inteira) e artigos que tratam o defeito.
+# defeito atinge o arquivo ou a coluna inteira) e artigos que tratam o defeito. Os defeitos
+# de entrega (atraso e reentrega) dizem também quantos dias depois a linha chega.
 defeitos:
   cpf_fora_do_padrao:
     descricao: CPF sem máscara, com máscara ou com zeros à esquerda perdidos.
@@ -159,10 +160,12 @@ defeitos:
     descricao: Evento fora de ordem ou atrasado (late-arriving).
     taxas: {rastro: 0.02, rotacerta: 0.02}
     artigos: [1, 4]
+    atraso_dias: {minimo: 1, maximo: 3}          # a linha chega 1 a 3 dias depois do evento
   cdc_duplicado:
     descricao: Registro CDC duplicado (reentrega da mesma operação).
     taxas: {embarque: 0.01}
     artigos: [2]
+    atraso_dias: {minimo: 1, maximo: 2}          # a reentrega chega 1 a 2 dias depois da original
   fk_orfa:
     descricao: FK órfã (passagem com rota inexistente).
     taxas: {solticket: 0.005}
