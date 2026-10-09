@@ -44,6 +44,7 @@ class Volumes(_Modelo):
     bases: int = Field(gt=0)
     lojas: int = Field(gt=0)
     colaboradores: int = Field(gt=0)
+    ordens_servico_patio: int = Field(gt=0)
 
 
 class Intervalo(_Modelo):
@@ -144,6 +145,60 @@ class ParametrosRotaCerta(_Modelo):
     ciclo: list[EtapaFrete] = Field(min_length=2)
 
 
+class PeriodoSnapshot(_Modelo):
+    """Frequência das fotos até `ate` (inclusive); sem `ate`, vale dali em diante."""
+
+    ate: date | None = None
+    frequencia: Literal["diaria", "semanal", "mensal"]
+    dia_semana: int | None = Field(default=None, ge=0, le=6)  # semanal: 0 = segunda
+
+
+class AgendaSnapshots(_Modelo):
+    """Datas em que um sistema de snapshot entrega fotos completas (ver `snapshot.py`)."""
+
+    desde: date | None = None  # nenhuma foto antes desta data (ex.: aquisição)
+    periodos: list[PeriodoSnapshot] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _coerencia(self):
+        erros = []
+        ates = [p.ate for p in self.periodos]
+        if ates[-1] is not None or any(a is None for a in ates[:-1]):
+            erros.append("só o último período não tem 'ate'")
+        elif any(a >= b for a, b in zip(ates[:-2], ates[1:-1])):
+            erros.append("os 'ate' dos períodos devem ser crescentes")
+        for periodo in self.periodos:
+            if (periodo.frequencia == "semanal") != (periodo.dia_semana is not None):
+                erros.append("'dia_semana' é obrigatório na frequência semanal e só nela")
+        if erros:
+            raise ValueError("; ".join(erros))
+        return self
+
+
+class MudancasCadastro(_Modelo):
+    maximo_por_cliente: int = Field(ge=0)
+    intervalo_dias: Intervalo
+    pesos: dict[Literal["telefone", "email", "endereco"], float] = Field(min_length=1)
+
+
+class OrdensServico(_Modelo):
+    duracao_dias: Intervalo
+    cancelamento: float = Field(ge=0, le=1)
+    valor: Intervalo
+    tipos: list[str] = Field(min_length=1)
+
+
+class ParametrosPatio(_Modelo):
+    """Comportamento do DMS da ModelBricks Veículos (*Pátio*)."""
+
+    snapshots: AgendaSnapshots
+    horario_operacao: Intervalo  # horas do dia (início inclusive, fim exclusive)
+    dias_em_estoque: Intervalo
+    mudancas_cadastro: MudancasCadastro
+    ordens_servico: OrdensServico
+    clientes_grupo: dict[str, str] = Field(min_length=1)  # empresa do grupo → razão social
+
+
 class Parametros(_Modelo):
     pessoas_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
     eventos_por_frete: Intervalo
@@ -153,6 +208,7 @@ class Parametros(_Modelo):
     passagemhub: ParametrosPassagemHub
     nucleo: ParametrosNucleo
     rotacerta: ParametrosRotaCerta
+    patio: ParametrosPatio
 
 
 class Periodo(_Modelo):
@@ -280,6 +336,7 @@ class Roteiro(_Modelo):
         erros += self._coerencia_do_passagemhub()
         erros += self._coerencia_do_nucleo()
         erros += self._coerencia_do_rotacerta()
+        erros += self._coerencia_do_patio()
         for nome, evento in self.eventos.items():
             erros += [f"eventos.{nome}: sistema desconhecido '{s}'" for s in evento.sistemas if s not in self.sistemas]
         for nome, defeito in self.defeitos.items():
@@ -450,6 +507,38 @@ class Roteiro(_Modelo):
                 f"parametros.eventos_por_frete deve ficar entre as {obrigatorias} etapas obrigatórias "
                 f"e as {len(r.ciclo)} etapas do ciclo do rotacerta"
             )
+        return erros
+
+    def _coerencia_do_patio(self) -> list[str]:
+        erros = []
+        p = self.parametros.patio
+        intervalos = {
+            "horario_operacao": p.horario_operacao,
+            "dias_em_estoque": p.dias_em_estoque,
+            "mudancas_cadastro.intervalo_dias": p.mudancas_cadastro.intervalo_dias,
+            "ordens_servico.duracao_dias": p.ordens_servico.duracao_dias,
+            "ordens_servico.valor": p.ordens_servico.valor,
+        }
+        for nome, intervalo in intervalos.items():
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"parametros.patio.{nome}.minimo é maior que o máximo")
+        if p.horario_operacao.minimo < 1 or p.horario_operacao.maximo > 23 or p.horario_operacao.minimo == p.horario_operacao.maximo:
+            erros.append("parametros.patio.horario_operacao deve ficar entre 1 e 23 h, com fim depois do início")
+        if p.dias_em_estoque.minimo < 1:
+            erros.append("parametros.patio.dias_em_estoque.minimo deve ser pelo menos 1")
+        if p.mudancas_cadastro.intervalo_dias.minimo < 1:
+            erros.append("parametros.patio.mudancas_cadastro.intervalo_dias.minimo deve ser pelo menos 1")
+        pesos = p.mudancas_cadastro.pesos
+        if any(v < 0 for v in pesos.values()) or sum(pesos.values()) <= 0:
+            erros.append("parametros.patio.mudancas_cadastro.pesos: pesos não negativos com soma positiva")
+        erros += [
+            f"parametros.patio.clientes_grupo: empresa '{e}' não compra frota própria"
+            for e in p.clientes_grupo if e not in ("mb_viacao", "mb_cargas")
+        ]
+        erros += [
+            f"parametros.patio.clientes_grupo: falta a empresa '{e}'"
+            for e in ("mb_viacao", "mb_cargas") if e not in p.clientes_grupo
+        ]
         return erros
 
     def fatia(self, artigo: str) -> Fatia:

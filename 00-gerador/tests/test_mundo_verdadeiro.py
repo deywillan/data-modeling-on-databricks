@@ -37,7 +37,9 @@ def test_gabarito_tem_as_tabelas_do_mundo_e_nada_dele_vai_para_a_landing(mundo):
 
     assert set(tabelas) == TABELAS | {"mapa_chaves", "defeitos"}
     entregues = [p.relative_to(destino.volume).as_posix() for p in destino.volume.rglob("*") if p.is_file()]
-    assert not [c for c in entregues if any(t in c.split("/") for t in TABELAS) or c.endswith(".parquet")]
+    # A landing tem só pastas de sistema; entidades de sistema podem ter o nome de uma
+    # tabela do mundo (ex.: `patio/veiculos/`), mas nunca na raiz nem em Parquet do gabarito.
+    assert not [c for c in entregues if c.split("/")[0] in TABELAS or c.endswith(".parquet")]
 
 
 def test_volumes_da_escala_vem_do_estudo_de_caso(mundo):

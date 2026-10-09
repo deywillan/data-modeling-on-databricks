@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 7
+versao: 8
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -34,6 +34,7 @@ volumes:
   bases: 30
   lojas: 15
   colaboradores: 1500
+  ordens_servico_patio: 12000                    # oficina da ModelBricks Veículos (DMS)
 
 # Parâmetros de comportamento do mundo verdadeiro e dos sistemas.
 parametros:
@@ -120,6 +121,33 @@ parametros:
       - {status: em_rota_de_entrega}
       - {status: entrega_frustrada, opcional: true}
       - {status: entregue}
+  # DMS da ModelBricks Veículos (Pátio): vendas de veículos e oficina, entregues como
+  # snapshot completo em CSV.
+  patio:
+    # Datas das fotos: cada período vale até `ate` (inclusive); o último, sem `ate`, vale
+    # para sempre (inclusive no avancar_tempo). Frequências: diaria, semanal (com
+    # `dia_semana`, 0 = segunda) ou mensal (último dia do mês).
+    snapshots:
+      periodos:
+        - {ate: 2025-11-30, frequencia: mensal}
+        - {ate: 2025-12-31, frequencia: diaria}
+        - {frequencia: diaria}
+    horario_operacao: {minimo: 8, maximo: 18}      # vendas e oficina entre 08h e 18h
+    dias_em_estoque: {minimo: 10, maximo: 120}     # da entrada do veículo no pátio à venda
+    # Atualizações cadastrais dos clientes (telefone, e-mail ou endereço), ao longo do tempo.
+    mudancas_cadastro:
+      maximo_por_cliente: 6
+      intervalo_dias: {minimo: 120, maximo: 900}   # entre o cadastro e cada mudança seguinte
+      pesos: {telefone: 0.4, email: 0.3, endereco: 0.3}
+    ordens_servico:
+      duracao_dias: {minimo: 0, maximo: 7}
+      cancelamento: 0.03                           # a OS cancelada é excluída do DMS
+      valor: {minimo: 250, maximo: 18000}
+      tipos: [Revisão, Troca de óleo, Freios, Suspensão, Elétrica, Pneus, Motor, Funilaria]
+    # Empresas do grupo que compram a frota própria: cadastradas como clientes do DMS.
+    clientes_grupo:
+      mb_viacao: ModelBricks Viação S.A.
+      mb_cargas: ModelBricks Cargas S.A.
 
 # Mundo verdadeiro: como as entidades mestres e a participação de cada uma nas empresas
 # do grupo são geradas. Pesos são relativos (não precisam somar 1).
