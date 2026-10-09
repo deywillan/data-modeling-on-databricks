@@ -34,5 +34,11 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A execução padrão deixa de fora os testes lentos (rode-os nos tickets de marco com
+# `pytest -m "lento or not lento"`). Ver tests/conftest.py e tests/geracoes.py.
+addopts = ["-m", "not lento"]
+markers = [
+    "lento: gerações extras ou no workspace (determinismo, geração em partes, fatias inteiras, Unity Catalog); fora da execução padrão",
+]
 # O sorteio do mundo verdadeiro numera poucos candidatos numa janela sem partição, de propósito.
 filterwarnings = ["ignore:.*No Partition Defined for Window operation.*:UserWarning"]
