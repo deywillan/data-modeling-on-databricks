@@ -65,6 +65,33 @@ class ParametrosEmbarque(_Modelo):
     adiamento_remarcacao_dias: Intervalo
 
 
+class IntervaloReal(_Modelo):
+    minimo: float
+    maximo: float
+
+
+class AreaOperacao(_Modelo):
+    latitude: IntervaloReal
+    longitude: IntervaloReal
+
+
+class ParametrosRastro(_Modelo):
+    """Comportamento da telemetria da holding (*Rastro*)."""
+
+    arquivos_por_dia: int = Field(gt=0, le=1440)  # janelas iguais do dia, um arquivo por janela
+    lotes_de_veiculos: int = Field(gt=0, le=100)  # arquivos por janela (frota dividida em lotes)
+    intervalo_eventos_minutos: int = Field(gt=0)
+    horario_operacao: Intervalo  # horas do dia (início inclusive, fim exclusive)
+    km_por_dia: Intervalo
+    velocidade_kmh: Intervalo
+    limite_velocidade_kmh: int = Field(gt=0)
+    frenagem_brusca: float = Field(ge=0, le=1)
+    consumo_combustivel_pct_dia: Intervalo
+    temperatura_motor_c: Intervalo
+    rpm: Intervalo
+    area_operacao: AreaOperacao
+
+
 class ParametrosPassagemHub(_Modelo):
     """Comportamento do marketplace parceiro da Viação (*PassagemHub*)."""
 
@@ -106,6 +133,7 @@ class Parametros(_Modelo):
     eventos_por_frete: Intervalo
     telemetria_dias_carga_inicial: int = Field(gt=0)
     embarque: ParametrosEmbarque
+    rastro: ParametrosRastro
     passagemhub: ParametrosPassagemHub
     nucleo: ParametrosNucleo
 
@@ -231,6 +259,7 @@ class Roteiro(_Modelo):
             erros.append("parametros.eventos_por_frete.minimo é maior que o máximo")
         erros += self._coerencia_do_mundo()
         erros += self._coerencia_do_embarque()
+        erros += self._coerencia_do_rastro()
         erros += self._coerencia_do_passagemhub()
         erros += self._coerencia_do_nucleo()
         for nome, evento in self.eventos.items():
@@ -294,6 +323,28 @@ class Roteiro(_Modelo):
             for x in c.modelos_veiculos
             if x.preco_minimo > x.preco_maximo
         ]
+        return erros
+
+    def _coerencia_do_rastro(self) -> list[str]:
+        erros = []
+        r = self.parametros.rastro
+        for nome in ("horario_operacao", "km_por_dia", "velocidade_kmh", "consumo_combustivel_pct_dia",
+                     "temperatura_motor_c", "rpm"):
+            intervalo = getattr(r, nome)
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"parametros.rastro.{nome}.minimo é maior que o máximo")
+        if not 0 <= r.horario_operacao.minimo < r.horario_operacao.maximo <= 24:
+            erros.append("parametros.rastro.horario_operacao deve ficar entre 0 e 24 h, com fim depois do início")
+        if r.horario_operacao.maximo * 60 - r.horario_operacao.minimo * 60 < r.intervalo_eventos_minutos:
+            erros.append("parametros.rastro.intervalo_eventos_minutos maior que o horário de operação")
+        if r.arquivos_por_dia * r.lotes_de_veiculos > 9999:
+            erros.append("parametros.rastro: arquivos_por_dia × lotes_de_veiculos passa de 9999 arquivos por dia")
+        if r.consumo_combustivel_pct_dia.maximo > 100:
+            erros.append("parametros.rastro.consumo_combustivel_pct_dia passa de 100")
+        for eixo in ("latitude", "longitude"):
+            faixa = getattr(r.area_operacao, eixo)
+            if faixa.minimo > faixa.maximo:
+                erros.append(f"parametros.rastro.area_operacao.{eixo}.minimo é maior que o máximo")
         return erros
 
     def _coerencia_do_embarque(self) -> list[str]:
