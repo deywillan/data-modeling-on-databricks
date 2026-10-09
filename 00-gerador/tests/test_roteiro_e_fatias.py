@@ -13,9 +13,11 @@ FATIAS_SEM_GABARITO = {"01-bronze", "02-historizacao", "04-ods", "07-star-schema
 
 @pytest.mark.parametrize("artigo", sorted(FATIAS_COM_GABARITO | FATIAS_SEM_GABARITO))
 def test_as_dez_fatias_estao_declaradas_e_o_gabarito_so_existe_quando_pedido(spark, destino, artigo):
-    gerar_fatia(artigo, destino, spark=spark)
+    gerar_fatia(artigo, destino, escala=0.01, spark=spark)
 
     assert (destino.raiz / "gabarito").is_dir() == (artigo in FATIAS_COM_GABARITO)
+    if artigo in FATIAS_COM_GABARITO:
+        assert any((destino.raiz / "gabarito").glob("*/*.parquet")), "gabarito declarado e vazio"
     assert not any("gabarito" in p.as_posix() for p in destino.volume.rglob("*"))
 
 

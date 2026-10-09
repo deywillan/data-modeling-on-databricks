@@ -10,9 +10,11 @@ ignorados (e avisados) pela API.
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+from functools import cached_property
 from typing import TYPE_CHECKING
 
 from ..escritor import Arquivo
+from ..mundo import Mundo, gerar_mundo
 from ..roteiro import Fatia, Roteiro
 from . import ibge
 
@@ -29,6 +31,12 @@ class Contexto:
     fatia: Fatia
     escala: float
     carga_inicial: bool  # True na carga inicial do gerar_fatia; False no avancar_tempo
+
+    @cached_property
+    def mundo(self) -> Mundo:
+        """Mundo verdadeiro da escala, montado na primeira consulta (DataFrames lazy por nome:
+        `contexto.mundo["pessoas"]`, `contexto.mundo["participacoes"]`; ver `mundo.TABELAS`)."""
+        return gerar_mundo(self.spark, self.roteiro, self.escala)
 
 
 Projecao = Callable[[Contexto, date, date], list[Arquivo]]

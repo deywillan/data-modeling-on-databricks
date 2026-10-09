@@ -29,3 +29,5 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# O sorteio do mundo verdadeiro numera poucos candidatos numa janela sem partição, de propósito.
+filterwarnings = ["ignore:.*No Partition Defined for Window operation.*:UserWarning"]

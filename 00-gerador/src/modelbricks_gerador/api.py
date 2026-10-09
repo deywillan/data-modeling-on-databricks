@@ -73,6 +73,9 @@ def gerar_fatia(
 
     contexto = Contexto(_sessao(spark, roteiro), roteiro, fatia, float(escala), carga_inicial=True)
     arquivos = _projetar(contexto, roteiro.datas.inicio, ate, destino)
+    if fatia.gabarito:
+        for tabela in contexto.mundo:
+            destino.gravar_gabarito(tabela, contexto.mundo.ordenado(tabela))
     gravar_relogio(destino, Relogio(ate, artigo, float(escala), roteiro.versao))
     return _concluir(
         Resultado(

@@ -29,12 +29,72 @@ volumes:
   fretes_rotacerta: 60000
   vendas_veiculos: 3000
   apolices: 8000
+  # Entidades de apoio do mundo verdadeiro (sem número no Estudo de Caso; definidas aqui).
+  rotas: 120
+  bases: 30
+  lojas: 15
+  colaboradores: 1500
 
 # Parâmetros de comportamento do mundo verdadeiro e dos sistemas.
 parametros:
   pessoas_em_mais_de_uma_empresa: 0.15
   eventos_por_frete: {minimo: 5, maximo: 8}
   telemetria_dias_carga_inicial: 90
+
+# Mundo verdadeiro: como as entidades mestres e a participação de cada uma nas empresas
+# do grupo são geradas. Pesos são relativos (não precisam somar 1).
+mundo:
+  # Tamanho (antes de deduplicar) de cada pool do Faker pt_BR gerado no driver.
+  tamanho_pools: 3000
+  # UFs em que o grupo atua: rotas, bases, lojas, pessoas e empresas usam municípios delas.
+  ufs_atuacao: [ES, MG, RJ, SP, BA, GO, DF, PR, SC, RS]
+  idade_pessoas: {minimo: 18, maximo: 85}
+  abertura_empresas: {inicio: 1980-01-01, fim: 2023-12-31}
+  admissao_colaboradores: {inicio: 2005-01-01, fim: 2025-12-31}
+  ano_fabricacao_veiculos: {minimo: 2012, maximo: 2025}
+  participacao:
+    # Empresa em que cada pessoa é cliente (a principal); `pessoas_em_mais_de_uma_empresa`
+    # (em `parametros`) define quantas são clientes também de uma segunda empresa.
+    pessoas: {mb_viacao: 0.70, evs: 0.15, mb_seguros: 0.10, mb_veiculos: 0.05}
+    empresas_pj: {mb_cargas: 0.70, mb_veiculos: 0.20, mb_seguros: 0.10}
+    empresas_pj_em_mais_de_uma_empresa: 0.20
+  # Vendas da ModelBricks Veículos: os veículos da frota própria vão para as empresas do
+  # grupo (ônibus para a Viação, caminhões para a Cargas); os demais, para clientes.
+  vendas_veiculos_para_pj: 0.70
+  rotas:
+    empresas: {mb_viacao: 0.80, evs: 0.20}
+    distancia_km: {minimo: 60, maximo: 1200}
+    tarifa_por_km: 0.32
+  bases: {mb_viacao: 0.50, mb_cargas: 0.40, evs: 0.10}
+  lojas: {mb_veiculos: 0.60, mb_seguros: 0.40}
+  colaboradores: {mb: 0.10, mb_viacao: 0.50, mb_cargas: 0.30, mb_veiculos: 0.10}
+
+# Catálogos de valores do mundo verdadeiro (texto, não números de volume).
+catalogos:
+  dominios_email: [gmail.com, hotmail.com, outlook.com, yahoo.com.br, uol.com.br, bol.com.br, terra.com.br]
+  ddds: [11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24, 27, 28, 31, 32, 33, 34, 35, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 51, 53, 54, 55, 61, 62, 64, 71, 73, 74, 75, 77]
+  ramos_empresa: [Transportes, Logística, Comércio, Distribuidora, Indústria, Agropecuária, Construtora, Alimentos, Mineração, Atacadista]
+  tipos_base: {mb_viacao: Garagem, mb_cargas: Centro de Distribuição, evs: Garagem Vale do Sol}
+  nomes_loja: {mb_veiculos: ModelBricks Veículos, mb_seguros: ModelBricks Seguros}
+  cargos:
+    mb: [Analista Financeiro, Analista de Compras, Assistente Administrativo, Analista de RH]
+    mb_viacao: [Motorista, Motorista, Motorista, Agente de Atendimento, Mecânico, Supervisor de Tráfego]
+    mb_cargas: [Motorista, Motorista, Ajudante de Carga, Conferente, Mecânico, Analista de Logística]
+    mb_veiculos: [Vendedor, Mecânico, Consultor de Serviços, Gerente de Loja]
+  # Modelos de ônibus e caminhões vendidos pela concessionária, com faixa de preço (R$).
+  modelos_veiculos:
+    - {marca: Mercedes-Benz, modelo: O 500 RSD, tipo: onibus, preco_minimo: 850000, preco_maximo: 1100000}
+    - {marca: Mercedes-Benz, modelo: OF 1721, tipo: onibus, preco_minimo: 520000, preco_maximo: 640000}
+    - {marca: Volvo, modelo: B450R, tipo: onibus, preco_minimo: 1100000, preco_maximo: 1350000}
+    - {marca: Scania, modelo: K 440, tipo: onibus, preco_minimo: 1000000, preco_maximo: 1250000}
+    - {marca: Volkswagen, modelo: 17.230 OD, tipo: onibus, preco_minimo: 480000, preco_maximo: 600000}
+    - {marca: Mercedes-Benz, modelo: Actros 2651, tipo: caminhao, preco_minimo: 900000, preco_maximo: 1150000}
+    - {marca: Mercedes-Benz, modelo: Atego 2430, tipo: caminhao, preco_minimo: 520000, preco_maximo: 650000}
+    - {marca: Volvo, modelo: FH 540, tipo: caminhao, preco_minimo: 950000, preco_maximo: 1200000}
+    - {marca: Scania, modelo: R 450, tipo: caminhao, preco_minimo: 850000, preco_maximo: 1050000}
+    - {marca: Volkswagen, modelo: Constellation 24.280, tipo: caminhao, preco_minimo: 450000, preco_maximo: 580000}
+    - {marca: Iveco, modelo: S-Way 480, tipo: caminhao, preco_minimo: 800000, preco_maximo: 980000}
+    - {marca: DAF, modelo: XF 530, tipo: caminhao, preco_minimo: 880000, preco_maximo: 1080000}
 
 # Sistemas de origem: como cada um entrega os arquivos na landing.
 sistemas:

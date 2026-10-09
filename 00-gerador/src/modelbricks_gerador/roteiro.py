@@ -40,6 +40,10 @@ class Volumes(_Modelo):
     fretes_rotacerta: int = Field(gt=0)
     vendas_veiculos: int = Field(gt=0)
     apolices: int = Field(gt=0)
+    rotas: int = Field(gt=0)
+    bases: int = Field(gt=0)
+    lojas: int = Field(gt=0)
+    colaboradores: int = Field(gt=0)
 
 
 class Intervalo(_Modelo):
@@ -51,6 +55,61 @@ class Parametros(_Modelo):
     pessoas_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
     eventos_por_frete: Intervalo
     telemetria_dias_carga_inicial: int = Field(gt=0)
+
+
+class Periodo(_Modelo):
+    inicio: date
+    fim: date
+
+
+Pesos = dict[str, float]
+
+
+class Participacao(_Modelo):
+    pessoas: Pesos = Field(min_length=2)
+    empresas_pj: Pesos = Field(min_length=2)
+    empresas_pj_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
+
+
+class Rotas(_Modelo):
+    empresas: Pesos = Field(min_length=1)
+    distancia_km: Intervalo
+    tarifa_por_km: float = Field(gt=0)
+
+
+class ParametrosMundo(_Modelo):
+    """Parâmetros do mundo verdadeiro (entidades mestres e participação nas empresas)."""
+
+    tamanho_pools: int = Field(gt=0)
+    ufs_atuacao: list[str] = Field(min_length=1)
+    idade_pessoas: Intervalo
+    abertura_empresas: Periodo
+    admissao_colaboradores: Periodo
+    ano_fabricacao_veiculos: Intervalo
+    participacao: Participacao
+    vendas_veiculos_para_pj: float = Field(ge=0, le=1)
+    rotas: Rotas
+    bases: Pesos = Field(min_length=1)
+    lojas: Pesos = Field(min_length=1)
+    colaboradores: Pesos = Field(min_length=1)
+
+
+class ModeloVeiculo(_Modelo):
+    marca: str
+    modelo: str
+    tipo: Literal["onibus", "caminhao"]
+    preco_minimo: float = Field(gt=0)
+    preco_maximo: float = Field(gt=0)
+
+
+class Catalogos(_Modelo):
+    dominios_email: list[str] = Field(min_length=1)
+    ddds: list[int] = Field(min_length=1)
+    ramos_empresa: list[str] = Field(min_length=1)
+    tipos_base: dict[str, str]
+    nomes_loja: dict[str, str]
+    cargos: dict[str, list[str]]
+    modelos_veiculos: list[ModeloVeiculo] = Field(min_length=1)
 
 
 class Sistema(_Modelo):
@@ -89,6 +148,8 @@ class Roteiro(_Modelo):
     fuso_horario: str
     volumes: Volumes
     parametros: Parametros
+    mundo: ParametrosMundo
+    catalogos: Catalogos
     sistemas: dict[str, Sistema]
     eventos: dict[str, Evento]
     defeitos: dict[str, Defeito]
@@ -113,6 +174,7 @@ class Roteiro(_Modelo):
         intervalo = self.parametros.eventos_por_frete
         if intervalo.minimo > intervalo.maximo:
             erros.append("parametros.eventos_por_frete.minimo é maior que o máximo")
+        erros += self._coerencia_do_mundo()
         for nome, evento in self.eventos.items():
             erros += [f"eventos.{nome}: sistema desconhecido '{s}'" for s in evento.sistemas if s not in self.sistemas]
         for nome, defeito in self.defeitos.items():
@@ -131,6 +193,47 @@ class Roteiro(_Modelo):
         if erros:
             raise ValueError("; ".join(erros))
         return self
+
+    def _coerencia_do_mundo(self) -> list[str]:
+        erros = []
+        v, m, c = self.volumes, self.mundo, self.catalogos
+        if not v.veiculos_frota_propria <= v.vendas_veiculos <= v.veiculos:
+            erros.append("volumes: é preciso veiculos_frota_propria <= vendas_veiculos <= veiculos")
+        if v.colaboradores > v.pessoas:
+            erros.append("volumes.colaboradores maior que volumes.pessoas")
+        for nome in ("idade_pessoas", "ano_fabricacao_veiculos"):
+            intervalo = getattr(m, nome)
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"mundo.{nome}.minimo é maior que o máximo")
+        for nome in ("abertura_empresas", "admissao_colaboradores"):
+            if getattr(m, nome).inicio > getattr(m, nome).fim:
+                erros.append(f"mundo.{nome}.inicio é posterior ao fim")
+        if m.rotas.distancia_km.minimo > m.rotas.distancia_km.maximo:
+            erros.append("mundo.rotas.distancia_km.minimo é maior que o máximo")
+        grupos = {
+            "mundo.participacao.pessoas": m.participacao.pessoas,
+            "mundo.participacao.empresas_pj": m.participacao.empresas_pj,
+            "mundo.rotas.empresas": m.rotas.empresas,
+            "mundo.bases": m.bases,
+            "mundo.lojas": m.lojas,
+            "mundo.colaboradores": m.colaboradores,
+        }
+        for campo, pesos in grupos.items():
+            erros += [f"{campo}: peso negativo em '{e}'" for e, p in pesos.items() if p < 0]
+            if sum(pesos.values()) <= 0:
+                erros.append(f"{campo}: a soma dos pesos deve ser positiva")
+        erros += [f"catalogos.tipos_base: falta a empresa '{e}'" for e in m.bases if e not in c.tipos_base]
+        erros += [f"catalogos.nomes_loja: falta a empresa '{e}'" for e in m.lojas if e not in c.nomes_loja]
+        erros += [f"catalogos.cargos: falta a empresa '{e}'" for e in m.colaboradores if not c.cargos.get(e)]
+        tipos = {modelo.tipo for modelo in c.modelos_veiculos}
+        if tipos != {"onibus", "caminhao"}:
+            erros.append("catalogos.modelos_veiculos: é preciso ao menos um ônibus e um caminhão")
+        erros += [
+            f"catalogos.modelos_veiculos: preço mínimo maior que o máximo em '{x.modelo}'"
+            for x in c.modelos_veiculos
+            if x.preco_minimo > x.preco_maximo
+        ]
+        return erros
 
     def fatia(self, artigo: str) -> Fatia:
         """Fatia declarada para o artigo; `KeyError` com as opções válidas se não existir."""
