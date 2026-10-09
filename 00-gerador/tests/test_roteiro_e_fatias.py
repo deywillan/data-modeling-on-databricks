@@ -25,19 +25,37 @@ def test_as_dez_fatias_estao_declaradas_com_gabarito_so_quando_pedido_e_sistemas
     assert not sem_projecao, "todo sistema de fatia tem projeção no gerador"
 
 
-@pytest.mark.lento
-@pytest.mark.parametrize("artigo", ["05-raw-vault", "06-business-vault", "10-data-marts"])
-def test_fatias_com_os_legados_geram_com_gabarito_fora_da_landing(spark, destino, artigo):
-    """Fatias inteiras dos artigos que recebem os legados (a 10 tem todos os sistemas); as
-    demais combinações já são geradas nos outros módulos."""
-    resultado = gerar_fatia(artigo, destino, escala=0.01, spark=spark)
+def test_fatias_05_e_06_tem_os_mesmos_sistemas_e_gabarito():
+    fatias = carregar_roteiro().fatias
 
-    assert resultado.gerou
+    assert fatias["05-raw-vault"].sistemas == fatias["06-business-vault"].sistemas
+    assert fatias["05-raw-vault"].gabarito == fatias["06-business-vault"].gabarito
+
+
+def _confere_fatia_inteira(artigo, gerada):
+    destino = gerada.final
+
+    assert gerada.resultados[-1].gerou
     assert (destino.raiz / "gabarito").is_dir() == (artigo in FATIAS_COM_GABARITO)
     assert any((destino.raiz / "gabarito").glob("*/*.parquet")), "gabarito declarado e vazio"
     assert not any("gabarito" in p.as_posix() for p in destino.volume.rglob("*"))
     raizes = {p.name for p in destino.volume.iterdir()}
     assert raizes == set(carregar_roteiro().fatia(artigo).sistemas) | {"_controle"}
+
+
+# Fatias inteiras dos artigos que recebem os legados: a 05 (a 06 tem os mesmos sistemas,
+# conferido acima) e a 10, que tem todos os sistemas. As demais combinações já são geradas
+# nos outros módulos. Geradas nas gerações `fatia_05` e `fatia_10`.
+
+
+@pytest.mark.lento
+def test_fatia_05_com_os_legados_gera_com_gabarito_fora_da_landing(fatia_05):
+    _confere_fatia_inteira("05-raw-vault", fatia_05)
+
+
+@pytest.mark.lento
+def test_fatia_10_com_todos_os_sistemas_gera_com_gabarito_fora_da_landing(fatia_10):
+    _confere_fatia_inteira("10-data-marts", fatia_10)
 
 
 def test_artigo_sem_fatia_falha_listando_as_opcoes(destino):

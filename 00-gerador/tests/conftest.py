@@ -39,8 +39,11 @@ GERACOES_EM_PARALELO = 3
 _GERACOES = {
     "principal_em_partes": geracoes.PRINCIPAL_EM_PARTES,
     "principal": geracoes.PRINCIPAL,
+    "fatia_10": geracoes.FATIA_10,
+    "fatia_01": geracoes.FATIA_01,
     "legados": geracoes.LEGADOS,
     "legados_em_partes": geracoes.LEGADOS_EM_PARTES,
+    "fatia_05": geracoes.FATIA_05,
     "patio": geracoes.PATIO,
     "patio_em_partes": geracoes.PATIO_EM_PARTES,
     "mundo_de_novo": geracoes.MUNDO,
@@ -158,6 +161,24 @@ def legados_em_partes(request, tmp_path_factory):
 @pytest.fixture(scope="session")
 def patio_em_partes(request, tmp_path_factory):
     return _obter(geracoes.PATIO_EM_PARTES, request, tmp_path_factory)
+
+
+@pytest.fixture(scope="session")
+def fatia_01(request, tmp_path_factory):
+    """Fatia 01-bronze inteira do artigo: carga inicial e avanço de 1 dia."""
+    return _obter(geracoes.FATIA_01, request, tmp_path_factory)
+
+
+@pytest.fixture(scope="session")
+def fatia_05(request, tmp_path_factory):
+    """Fatia 05-raw-vault inteira (a 06-business-vault tem os mesmos sistemas)."""
+    return _obter(geracoes.FATIA_05, request, tmp_path_factory)
+
+
+@pytest.fixture(scope="session")
+def fatia_10(request, tmp_path_factory):
+    """Fatia 10-data-marts inteira (todos os sistemas)."""
+    return _obter(geracoes.FATIA_10, request, tmp_path_factory)
 
 
 @pytest.fixture(scope="session")

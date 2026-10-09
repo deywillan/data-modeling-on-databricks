@@ -2,10 +2,11 @@
 destino local: sistemas da fatia, formatos, determinismo, idempotência, `reset` e a
 fronteira do primeiro destino (nada em `bronze`, `silver` ou `gold`).
 
-Para poupar a cota, a fatia é gerada só duas vezes no módulo: no destino A (carga
-inicial, segunda chamada sem reset e avanço de 1 dia) e no destino B, cópia da carga de A
-recriada com `reset=True`, o que também compara duas gerações independentes. É o teste de
-marco do ticket 10 (fatia oficial inteira), por isso marcado como `lento`.
+Para poupar a cota, a fatia é gerada só duas vezes: na geração compartilhada `fatia_01`
+(carga inicial e avanço de 1 dia, pré-aquecida em paralelo e com cache) e no destino B, cópia
+da carga recriada com `reset=True`, o que também compara duas gerações independentes. A
+segunda chamada sem reset volta antes de abrir a sessão. É o teste de marco do ticket 10
+(fatia oficial inteira), por isso marcado como `lento`.
 """
 
 import csv
@@ -15,14 +16,15 @@ import shutil
 from datetime import date
 from pathlib import Path
 
+import geracoes
 import pytest
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro, gerar_fatia
 
 pytestmark = pytest.mark.lento
 
 ARTIGO = "01-bronze"
-ESCALA = 0.01  # escala mínima: estes testes não olham volumes
+ESCALA = geracoes.ESCALA_FATIA_INTEIRA  # menor escala com rota da Viação (a 0,01 não tem passagens)
 CARGA_INICIAL = date(2025, 12, 31)
 DIA_NOVO = "2026-01-01"
 SISTEMAS = {"embarque", "patio", "passagemhub", "rastro", "ibge"}
@@ -42,24 +44,28 @@ def _sem_relogio(conteudo: dict[str, bytes]) -> dict[str, bytes]:
 
 
 @pytest.fixture(scope="module")
-def fatia(spark, tmp_path_factory):
+def fatia(fatia_01, spark, tmp_path_factory):
+    """A geração `fatia_01` (carga inicial e avanço de 1 dia) mais duas cópias da carga: uma
+    para a segunda chamada sem reset (volta antes de abrir a sessão) e outra, com um arquivo
+    intruso, recriada com `reset=True`, o que também compara duas gerações independentes."""
     pasta = tmp_path_factory.mktemp("fatia01")
-    a = DestinoLocal(pasta / "a" / "medalhao_01_bronze")
-    primeira = gerar_fatia(ARTIGO, a, escala=ESCALA, spark=spark)
-    carga = _conteudo(a.raiz)
+    carga_inicial = fatia_01.etapas[0]
+    carga = _conteudo(carga_inicial.raiz)
+
+    sem_reset = DestinoLocal(pasta / "sem_reset" / "medalhao_01_bronze")
+    shutil.copytree(carga_inicial.raiz, sem_reset.raiz)
+    segunda = gerar_fatia(ARTIGO, sem_reset, escala=ESCALA, roteiro=fatia_01.roteiro)
+    depois_da_segunda = _conteudo(sem_reset.raiz)
+
     b = DestinoLocal(pasta / "b" / "medalhao_01_bronze")
-    shutil.copytree(a.raiz, b.raiz)
-
-    segunda = gerar_fatia(ARTIGO, a, escala=ESCALA, spark=spark)
-    depois_da_segunda = _conteudo(a.raiz)
-    avanco = avancar_tempo(ARTIGO, a, 1, spark=spark)
-
+    shutil.copytree(carga_inicial.raiz, b.raiz)
     intruso = b.raiz / "bronze" / "sobra_de_execucao_anterior.txt"
     intruso.write_text("lixo", encoding="utf-8")
-    recriada = gerar_fatia(ARTIGO, b, escala=ESCALA, reset=True, spark=spark)
+    recriada = gerar_fatia(ARTIGO, b, escala=ESCALA, reset=True, spark=spark, roteiro=fatia_01.roteiro)
     return {
-        "a": a, "b": b, "carga": carga, "primeira": primeira, "segunda": segunda,
-        "depois_da_segunda": depois_da_segunda, "avanco": avanco, "recriada": recriada, "intruso": intruso,
+        "a": fatia_01.final, "b": b, "carga": carga, "primeira": fatia_01.resultados[0], "segunda": segunda,
+        "depois_da_segunda": depois_da_segunda, "avanco": fatia_01.resultados[1], "recriada": recriada,
+        "intruso": intruso,
     }
 
 

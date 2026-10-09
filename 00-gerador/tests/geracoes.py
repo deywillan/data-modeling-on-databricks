@@ -133,6 +133,14 @@ PATIO_EM_PARTES = Geracao(  # o avanço atravessa o fim do período diário fech
     "patio_em_partes", "92-patio", 0.2, "teste", (("gerar", date(2025, 12, 30)), ("avancar", 4)),
 )
 MUNDO = Geracao("mundo", "93-mundo", 0.05, "teste", (("gerar", CARGA_INICIAL),))
+# Fatias inteiras dos artigos (as fatias oficiais do roteiro), na menor escala em que a Viação
+# tem rota: a 0,01 a única rota é do Vale do Sol e não há passagens.
+ESCALA_FATIA_INTEIRA = 0.03
+FATIA_01 = Geracao(  # carga inicial e avanço de 1 dia (test_gerar_fatia)
+    "fatia_01", "01-bronze", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL), ("avancar", 1)),
+)
+FATIA_05 = Geracao("fatia_05", "05-raw-vault", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
+FATIA_10 = Geracao("fatia_10", "10-data-marts", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
 
 
 @dataclass(frozen=True)
