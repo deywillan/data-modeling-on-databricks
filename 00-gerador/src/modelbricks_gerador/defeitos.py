@@ -127,6 +127,18 @@ class Defeitos:
             df = self._trocar(df, alvo, tipo, coluna, F.lit(None).cast(df.schema[coluna].dataType), extra=escolha == i)
         return df
 
+    def municipio_fora_do_padrao(self, df: "DataFrame", alvo: Alvo, coluna: str) -> "DataFrame":
+        """Código IBGE de município com 6 dígitos (sem o verificador) ou com zero à esquerda
+        (8 dígitos). Com o defeito ativo, a coluna passa a ser texto em todas as linhas."""
+        tipo = "municipio_fora_do_padrao"
+        if not self._ativo(tipo):
+            return df
+        from pyspark.sql import functions as F
+
+        df = df.withColumn(coluna, F.col(coluna).cast("string"))
+        variantes = [f"substr({coluna}, 1, 6)", f"lpad({coluna}, 8, '0')"]
+        return self._trocar(df, alvo, tipo, coluna, self._variante(tipo, alvo, coluna, variantes))
+
     def fk_orfa(self, df: "DataFrame", alvo: Alvo, coluna: str, valor_inexistente: str) -> "DataFrame":
         """Troca a FK por `valor_inexistente` (expressão SQL que a projeção garante não
         existir na entidade referenciada). Sorteio pela chave: todas as linhas da mesma
