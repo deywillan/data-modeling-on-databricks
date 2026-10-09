@@ -12,6 +12,10 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.scripts]
+# Pontos de entrada dos jobs do bundle (python_wheel_task).
+gerar_fatia = "modelbricks_gerador.cli:gerar_fatia"
+
 [dependency-groups]
 # Só para os testes locais (Databricks Connect serverless). Nunca vão para o wheel:
 # o ambiente serverless dos jobs (environment_version "6") já traz essas bibliotecas.
