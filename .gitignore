@@ -4,3 +4,10 @@ specs/
 # Configuração local de ferramentas (Claude Code, Databricks CLI)
 .claude/
 .databricks/
+
+# Python e build do wheel do gerador
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+00-gerador/dist/

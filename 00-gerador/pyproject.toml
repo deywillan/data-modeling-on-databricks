@@ -1,0 +1,31 @@
+[project]
+name = "modelbricks-gerador"
+version = "0.1.0"
+description = "Gerador de dados sintéticos do Grupo ModelBricks para a série Um caminho para implementação da Arquitetura Medalhão"
+requires-python = "==3.12.*"
+dependencies = [
+    # A API dbldatagen.core não está no PyPI: pin por commit para determinismo.
+    "dbldatagen @ git+https://github.com/databrickslabs/dbldatagen@e9b6cde565f885d38be278552543dcb938bc413a",
+    "pydantic>=2.0",
+    # Pin exato: os pools do Faker são gerados no driver e a versão muda os dados.
+    "faker==40.41.0",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+# Só para os testes locais (Databricks Connect serverless). Nunca vão para o wheel:
+# o ambiente serverless dos jobs (environment_version "6") já traz essas bibliotecas.
+dev = [
+    "databricks-connect==19.1.*",
+    "numpy==2.3.4",
+    "pandas==2.3.3",
+    "pyarrow==21.0.0",
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
