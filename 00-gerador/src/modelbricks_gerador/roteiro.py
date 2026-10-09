@@ -156,7 +156,10 @@ def carregar_roteiro(caminho: str | Path | None = None) -> Roteiro:
     try:
         return Roteiro.model_validate(dados)
     except ValidationError as erro:
-        detalhes = "\n".join(
-            f"  - {'.'.join(str(p) for p in e['loc']) or '(raiz)'}: {e['msg']}" for e in erro.errors()
-        )
+        linhas = []
+        for e in erro.errors():
+            campo = ".".join(str(p) for p in e["loc"])
+            for problema in e["msg"].removeprefix("Value error, ").split("; "):
+                linhas.append(f"  - {campo}: {problema}" if campo else f"  - {problema}")
+        detalhes = "\n".join(linhas)
         raise RoteiroInvalido(f"Roteiro {origem} inválido:\n{detalhes}") from None
