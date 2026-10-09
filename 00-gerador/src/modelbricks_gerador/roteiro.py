@@ -101,6 +101,22 @@ class ParametrosNucleo(_Modelo):
     depreciacao_ao_ano: float = Field(ge=0, le=1)
 
 
+class EtapaFrete(_Modelo):
+    status: str
+    opcional: bool = False
+
+
+class ParametrosRotaCerta(_Modelo):
+    """Comportamento do TMS da Cargas (*RotaCerta*): ciclo de status dos fretes."""
+
+    horario_operacao: Intervalo  # horas do dia (início inclusive, fim exclusive)
+    dias_entre_eventos: Intervalo
+    prazo_entrega_dias: Intervalo
+    peso_kg: Intervalo
+    frete_por_kg: float = Field(gt=0)
+    ciclo: list[EtapaFrete] = Field(min_length=2)
+
+
 class Parametros(_Modelo):
     pessoas_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
     eventos_por_frete: Intervalo
@@ -108,6 +124,7 @@ class Parametros(_Modelo):
     embarque: ParametrosEmbarque
     passagemhub: ParametrosPassagemHub
     nucleo: ParametrosNucleo
+    rotacerta: ParametrosRotaCerta
 
 
 class Periodo(_Modelo):
@@ -233,6 +250,7 @@ class Roteiro(_Modelo):
         erros += self._coerencia_do_embarque()
         erros += self._coerencia_do_passagemhub()
         erros += self._coerencia_do_nucleo()
+        erros += self._coerencia_do_rotacerta()
         for nome, evento in self.eventos.items():
             erros += [f"eventos.{nome}: sistema desconhecido '{s}'" for s in evento.sistemas if s not in self.sistemas]
         for nome, defeito in self.defeitos.items():
@@ -355,6 +373,32 @@ class Roteiro(_Modelo):
             pesos = getattr(n, nome)
             if any(v < 0 for v in pesos.values()) or sum(pesos.values()) <= 0:
                 erros.append(f"parametros.nucleo.{nome}: pesos devem ser não negativos com soma positiva")
+        return erros
+
+    def _coerencia_do_rotacerta(self) -> list[str]:
+        erros = []
+        r = self.parametros.rotacerta
+        for nome in ("horario_operacao", "dias_entre_eventos", "prazo_entrega_dias", "peso_kg"):
+            intervalo = getattr(r, nome)
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"parametros.rotacerta.{nome}.minimo é maior que o máximo")
+        h = r.horario_operacao
+        if h.minimo < 1 or h.maximo > 24 or h.minimo == h.maximo:
+            erros.append("parametros.rotacerta.horario_operacao deve ficar entre 1 e 24 h, com fim depois do início")
+        if r.dias_entre_eventos.minimo < 1 or r.prazo_entrega_dias.minimo < 1 or r.peso_kg.minimo < 1:
+            erros.append("parametros.rotacerta: dias_entre_eventos, prazo_entrega_dias e peso_kg começam em 1")
+        status = [etapa.status for etapa in r.ciclo]
+        if len(set(status)) != len(status):
+            erros.append("parametros.rotacerta.ciclo: status repetido")
+        if r.ciclo[0].opcional or r.ciclo[-1].opcional:
+            erros.append("parametros.rotacerta.ciclo: a primeira e a última etapa não podem ser opcionais")
+        obrigatorias = sum(not etapa.opcional for etapa in r.ciclo)
+        eventos = self.parametros.eventos_por_frete
+        if not obrigatorias <= eventos.minimo <= eventos.maximo <= len(r.ciclo):
+            erros.append(
+                f"parametros.eventos_por_frete deve ficar entre as {obrigatorias} etapas obrigatórias "
+                f"e as {len(r.ciclo)} etapas do ciclo do rotacerta"
+            )
         return erros
 
     def fatia(self, artigo: str) -> Fatia:

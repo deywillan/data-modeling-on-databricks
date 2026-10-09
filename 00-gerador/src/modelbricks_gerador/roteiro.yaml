@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 5
+versao: 6
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -83,6 +83,24 @@ parametros:
     dias_pagamento_apos_vencimento: {minimo: 0, maximo: 5}
     cancelamento_titulo: 0.03                    # título excluído antes do vencimento (soft delete)
     depreciacao_ao_ano: 0.10                     # veículos da frota própria (ativos), lançada no fim do mês
+  # TMS da Cargas (RotaCerta): CDC de fretes. Cada frete percorre o ciclo abaixo em
+  # `eventos_por_frete` mudanças de status (as etapas opcionais completam a quantidade),
+  # uma por dia, com `dias_entre_eventos` de intervalo entre elas.
+  rotacerta:
+    horario_operacao: {minimo: 6, maximo: 22}    # aberturas e mudanças de status entre 06h e 22h
+    dias_entre_eventos: {minimo: 1, maximo: 3}
+    prazo_entrega_dias: {minimo: 4, maximo: 15}  # data prevista de entrega, contada da abertura
+    peso_kg: {minimo: 300, maximo: 28000}
+    frete_por_kg: 0.42                           # R$ por kg transportado
+    ciclo:
+      - {status: aberto}
+      - {status: coleta_agendada, opcional: true}
+      - {status: coletado}
+      - {status: em_transito}
+      - {status: em_transbordo, opcional: true}  # passagem por um centro de distribuição
+      - {status: em_rota_de_entrega}
+      - {status: entrega_frustrada, opcional: true}
+      - {status: entregue}
 
 # Mundo verdadeiro: como as entidades mestres e a participação de cada uma nas empresas
 # do grupo são geradas. Pesos são relativos (não precisam somar 1).
