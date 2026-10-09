@@ -66,6 +66,22 @@ class ParametrosEmbarque(_Modelo):
     adiamento_remarcacao_dias: Intervalo
 
 
+class ParametrosPassagemHub(_Modelo):
+    """Comportamento do marketplace parceiro da Viação (*PassagemHub*)."""
+
+    eventos_por_pagina: int = Field(gt=0)
+    canais: dict[str, float] = Field(min_length=1)
+    horario_vendas: Intervalo  # horas do dia (início inclusive, fim exclusive)
+    antecedencia_compra_dias: Intervalo
+    poltronas: int = Field(gt=0)
+    cancelamento: float = Field(ge=0, le=1)
+    remarcacao: float = Field(ge=0, le=1)
+    adiamento_remarcacao_dias: Intervalo
+    taxa_servico: float = Field(ge=0)
+    formas_pagamento: dict[str, float] = Field(min_length=1)
+    parcelas_cartao: Intervalo
+
+
 class PeriodoSnapshot(_Modelo):
     """Frequência das fotos até `ate` (inclusive); sem `ate`, vale dali em diante."""
 
@@ -125,6 +141,7 @@ class Parametros(_Modelo):
     eventos_por_frete: Intervalo
     telemetria_dias_carga_inicial: int = Field(gt=0)
     embarque: ParametrosEmbarque
+    passagemhub: ParametrosPassagemHub
     patio: ParametrosPatio
 
 
@@ -249,6 +266,7 @@ class Roteiro(_Modelo):
             erros.append("parametros.eventos_por_frete.minimo é maior que o máximo")
         erros += self._coerencia_do_mundo()
         erros += self._coerencia_do_embarque()
+        erros += self._coerencia_do_passagemhub()
         erros += self._coerencia_do_patio()
         for nome, evento in self.eventos.items():
             erros += [f"eventos.{nome}: sistema desconhecido '{s}'" for s in evento.sistemas if s not in self.sistemas]
@@ -331,6 +349,27 @@ class Roteiro(_Modelo):
         reajuste = self.eventos.get("reajuste_tarifas_embarque")
         if reajuste is None or "percentual" not in reajuste.parametros:
             erros.append("eventos.reajuste_tarifas_embarque: falta o evento ou o parâmetro 'percentual'")
+        return erros
+
+    def _coerencia_do_passagemhub(self) -> list[str]:
+        erros = []
+        p = self.parametros.passagemhub
+        for nome in ("horario_vendas", "antecedencia_compra_dias", "adiamento_remarcacao_dias", "parcelas_cartao"):
+            intervalo = getattr(p, nome)
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"parametros.passagemhub.{nome}.minimo é maior que o máximo")
+        if p.horario_vendas.maximo > 24 or p.horario_vendas.minimo == p.horario_vendas.maximo:
+            erros.append("parametros.passagemhub.horario_vendas deve ficar entre 0 e 24 h, com fim depois do início")
+        if p.adiamento_remarcacao_dias.minimo < 1 or p.parcelas_cartao.minimo < 1:
+            erros.append("parametros.passagemhub: adiamento_remarcacao_dias e parcelas_cartao começam em 1")
+        if p.cancelamento + p.remarcacao > 1:
+            erros.append("parametros.passagemhub: cancelamento + remarcacao passa de 1")
+        for nome in ("canais", "formas_pagamento"):
+            pesos = getattr(p, nome)
+            if any(v < 0 for v in pesos.values()) or sum(pesos.values()) <= 0:
+                erros.append(f"parametros.passagemhub.{nome}: pesos devem ser não negativos com soma positiva")
+        if "coluna_nova_passagemhub" not in self.eventos:
+            erros.append("eventos.coluna_nova_passagemhub: falta o evento")
         return erros
 
     def _coerencia_do_patio(self) -> list[str]:

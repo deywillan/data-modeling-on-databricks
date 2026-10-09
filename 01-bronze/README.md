@@ -32,3 +32,13 @@ databricks bundle run 01_setup -p <seu-perfil> --params escala=0.1,reset=true
 Rodar o job de novo sem `reset` não altera nada: ele só informa a data do relógio.
 
 Se o seu usuário não puder criar catálogos, o job avisa e usa a alternativa: o catálogo `medalhao`, com os schemas `a01_landing`, `a01_bronze`, `a01_silver` e `a01_gold`.
+
+## Como avançar o tempo (`avancar_tempo`)
+
+Depois do `01_setup`, o relógio simulado está em 31/12/2025. Para ver novos lotes chegarem à landing, avance o relógio e rode o pipeline de novo:
+
+```bash
+databricks bundle run avancar_tempo -p <seu-perfil> --params artigo=01-bronze,dias=1
+```
+
+O job gera os lotes dos dias seguintes ao relógio só para os sistemas deste artigo e grava apenas arquivos novos: nenhum arquivo já entregue muda. Avançar 3 dias de uma vez produz o mesmo conteúdo que avançar 1 dia três vezes. Alguns eventos do roteiro ficam de propósito depois de 31/12/2025, como o reajuste de tarifas do *Embarque* em 12/01/2026, para que você os veja acontecer.
