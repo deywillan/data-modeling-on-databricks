@@ -8,7 +8,8 @@ exatamente os mesmos bytes. Regras:
 - nada de Python UDF (falha via Databricks Connect serverless).
 
 Interface: `Arquivo`, `caminho_landing(...)` e os serializadores `json_linhas`, `csv` e
-`parquet`, que recebem um DataFrame e devolvem `bytes`.
+`parquet`, que recebem um DataFrame e devolvem `bytes`, e `parquet_de_arrow`, para uma
+`pyarrow.Table` já coletada.
 """
 
 import io
@@ -65,9 +66,13 @@ def csv(df: "DataFrame", ordem: Sequence[str], separador: str = ",", encoding: s
 
 def parquet(df: "DataFrame", ordem: Sequence[str]) -> bytes:
     """Parquet (snappy, sem metadados do pandas), com os tipos preservados via Arrow."""
+    return parquet_de_arrow(df.orderBy(*ordem).toArrow())
+
+
+def parquet_de_arrow(tabela) -> bytes:
+    """Parquet (snappy, sem metadados de esquema) de uma `pyarrow.Table` já coletada e ordenada."""
     import pyarrow.parquet as pq
 
-    tabela = df.orderBy(*ordem).toArrow().replace_schema_metadata(None)
     buffer = io.BytesIO()
-    pq.write_table(tabela, buffer, compression="snappy")
+    pq.write_table(tabela.replace_schema_metadata(None), buffer, compression="snappy")
     return buffer.getvalue()

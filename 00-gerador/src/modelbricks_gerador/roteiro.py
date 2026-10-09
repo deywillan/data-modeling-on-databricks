@@ -81,12 +81,33 @@ class ParametrosPassagemHub(_Modelo):
     parcelas_cartao: Intervalo
 
 
+class ParametrosNucleo(_Modelo):
+    """Comportamento do ERP corporativo (*Núcleo*). Taxas "ao ano" por registro."""
+
+    horario_implantacao: Intervalo  # horas do dia (início inclusive, fim exclusive)
+    horario_expediente: Intervalo
+    mudanca_cargo_ao_ano: float = Field(ge=0, le=1)
+    fornecedores: float = Field(gt=0, le=1)  # fração das empresas PJ
+    fornecedores_na_implantacao: float = Field(ge=0, le=1)
+    atualizacao_fornecedor_ao_ano: float = Field(ge=0, le=1)
+    exclusao_fornecedor_ao_ano: float = Field(ge=0, le=1)
+    titulos_pagar: int = Field(gt=0)  # na escala 1, de datas.inicio a datas.carga_inicial
+    empresas_titulos: dict[str, float] = Field(min_length=1)
+    categorias_despesa: dict[str, float] = Field(min_length=1)
+    valor_titulo: Intervalo
+    prazo_vencimento_dias: Intervalo
+    dias_pagamento_apos_vencimento: Intervalo
+    cancelamento_titulo: float = Field(ge=0, le=1)
+    depreciacao_ao_ano: float = Field(ge=0, le=1)
+
+
 class Parametros(_Modelo):
     pessoas_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
     eventos_por_frete: Intervalo
     telemetria_dias_carga_inicial: int = Field(gt=0)
     embarque: ParametrosEmbarque
     passagemhub: ParametrosPassagemHub
+    nucleo: ParametrosNucleo
 
 
 class Periodo(_Modelo):
@@ -211,6 +232,7 @@ class Roteiro(_Modelo):
         erros += self._coerencia_do_mundo()
         erros += self._coerencia_do_embarque()
         erros += self._coerencia_do_passagemhub()
+        erros += self._coerencia_do_nucleo()
         for nome, evento in self.eventos.items():
             erros += [f"eventos.{nome}: sistema desconhecido '{s}'" for s in evento.sistemas if s not in self.sistemas]
         for nome, defeito in self.defeitos.items():
@@ -313,6 +335,26 @@ class Roteiro(_Modelo):
                 erros.append(f"parametros.passagemhub.{nome}: pesos devem ser não negativos com soma positiva")
         if "coluna_nova_passagemhub" not in self.eventos:
             erros.append("eventos.coluna_nova_passagemhub: falta o evento")
+        return erros
+
+    def _coerencia_do_nucleo(self) -> list[str]:
+        erros = []
+        n = self.parametros.nucleo
+        for nome in ("horario_implantacao", "horario_expediente", "valor_titulo",
+                     "prazo_vencimento_dias", "dias_pagamento_apos_vencimento"):
+            intervalo = getattr(n, nome)
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"parametros.nucleo.{nome}.minimo é maior que o máximo")
+        for nome in ("horario_implantacao", "horario_expediente"):
+            intervalo = getattr(n, nome)
+            if intervalo.maximo > 24 or intervalo.minimo == intervalo.maximo:
+                erros.append(f"parametros.nucleo.{nome} deve ficar entre 0 e 24 h, com fim depois do início")
+        if n.prazo_vencimento_dias.minimo < 1 or n.valor_titulo.minimo < 1:
+            erros.append("parametros.nucleo: prazo_vencimento_dias e valor_titulo começam em 1")
+        for nome in ("empresas_titulos", "categorias_despesa"):
+            pesos = getattr(n, nome)
+            if any(v < 0 for v in pesos.values()) or sum(pesos.values()) <= 0:
+                erros.append(f"parametros.nucleo.{nome}: pesos devem ser não negativos com soma positiva")
         return erros
 
     def fatia(self, artigo: str) -> Fatia:

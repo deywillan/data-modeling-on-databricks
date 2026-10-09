@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 4
+versao: 5
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -65,6 +65,24 @@ parametros:
     # Coluna nova `pagamento` (evento coluna_nova_passagemhub): forma e parcelas.
     formas_pagamento: {pix: 0.45, cartao_credito: 0.45, boleto: 0.10}
     parcelas_cartao: {minimo: 1, maximo: 6}
+  # ERP corporativo (Núcleo): incremental por updated_at, com soft delete. Taxas "ao ano" são a
+  # chance de cada registro sofrer a mudança num ano (sorteada dia a dia).
+  nucleo:
+    horario_implantacao: {minimo: 0, maximo: 6}  # carga da implantação no 1º dia, de madrugada
+    horario_expediente: {minimo: 8, maximo: 18}  # lançamentos do dia a dia
+    mudanca_cargo_ao_ano: 0.12                   # colaborador muda de cargo (histórico de cargo)
+    fornecedores: 0.20                           # fração das empresas PJ que fornecem ao grupo
+    fornecedores_na_implantacao: 0.70            # o restante é cadastrado ao longo da história
+    atualizacao_fornecedor_ao_ano: 0.25          # troca de telefone do fornecedor
+    exclusao_fornecedor_ao_ano: 0.05             # fornecedor excluído (soft delete)
+    titulos_pagar: 24000                         # títulos a pagar em 2024 e 2025, na escala 1
+    empresas_titulos: {mb: 0.15, mb_viacao: 0.40, mb_cargas: 0.35, mb_veiculos: 0.10}
+    categorias_despesa: {combustivel: 0.35, pecas: 0.20, manutencao: 0.15, servicos: 0.15, aluguel: 0.05, outros: 0.10}
+    valor_titulo: {minimo: 300, maximo: 60000}   # R$
+    prazo_vencimento_dias: {minimo: 15, maximo: 60}
+    dias_pagamento_apos_vencimento: {minimo: 0, maximo: 5}
+    cancelamento_titulo: 0.03                    # título excluído antes do vencimento (soft delete)
+    depreciacao_ao_ano: 0.10                     # veículos da frota própria (ativos), lançada no fim do mês
 
 # Mundo verdadeiro: como as entidades mestres e a participação de cada uma nas empresas
 # do grupo são geradas. Pesos são relativos (não precisam somar 1).
