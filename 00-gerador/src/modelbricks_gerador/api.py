@@ -82,10 +82,7 @@ def gerar_fatia(
     if fatia.gabarito:
         for tabela in contexto.mundo:
             destino.gravar_gabarito(tabela, contexto.mundo.ordenado(tabela))
-        mapas = [e.mapa_chaves for e in entregas if e.mapa_chaves is not None]
-        if mapas:
-            mapa = reduce(lambda a, b: a.unionByName(b), mapas)
-            destino.gravar_gabarito(TABELA_MAPA_CHAVES, mapa.orderBy(*COLUNAS_MAPA))
+        _gravar_mapa_chaves(entregas, destino)
         _gravar_defeitos(contexto, entregas, destino, acrescentar=False)
     gravar_relogio(destino, Relogio(ate, artigo, float(escala), roteiro.versao))
     return _concluir(
@@ -122,6 +119,7 @@ def avancar_tempo(
     entregas = _projetar(contexto, inicio, fim, destino)
     arquivos = sum(len(e.lotes) for e in entregas)
     if fatia.gabarito:
+        _gravar_mapa_chaves(entregas, destino)
         _gravar_defeitos(contexto, entregas, destino, acrescentar=True)
     gravar_relogio(destino, Relogio(fim, artigo, relogio.escala, roteiro.versao))
     return _concluir(
@@ -144,6 +142,16 @@ def _projetar(contexto: Contexto, inicio: date, fim: date, destino: Destino) -> 
         destino.gravar_arquivos(lote.arquivo for lote in entrega.lotes)
         entregas.append(entrega)
     return entregas
+
+
+def _gravar_mapa_chaves(entregas: list[Entrega], destino: Destino) -> None:
+    """Regrava `gabarito.mapa_chaves`. O mapa de cada entrega é acumulado (todas as chaves
+    que o sistema usou até o fim do intervalo), então substituir a tabela no `avancar_tempo`
+    inclui as chaves que surgiram nos dias novos sem duplicar as antigas."""
+    mapas = [e.mapa_chaves for e in entregas if e.mapa_chaves is not None]
+    if mapas:
+        mapa = reduce(lambda a, b: a.unionByName(b), mapas).distinct()
+        destino.gravar_gabarito(TABELA_MAPA_CHAVES, mapa.orderBy(*COLUNAS_MAPA))
 
 
 def _gravar_defeitos(contexto: Contexto, entregas: list[Entrega], destino: Destino, acrescentar: bool) -> None:

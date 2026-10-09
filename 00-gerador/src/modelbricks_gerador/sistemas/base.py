@@ -61,7 +61,11 @@ class Entrega:
       aparecem nos lotes desta entrega (gravados em `gabarito.defeitos`); vazio se não há;
     - `mapa_chaves`: DataFrame no esquema de `chaves.COLUNAS_MAPA` (chave verdadeira →
       chave do sistema), gravado em `gabarito.mapa_chaves`; `None` se o sistema não tem
-      entidades do mundo verdadeiro.
+      entidades do mundo verdadeiro. É **acumulado**: cobre toda chave que o sistema usou
+      do início da história até `fim` (não só as do intervalo; antecipar chaves futuras é
+      permitido). O `avancar_tempo` substitui a tabela pelo mapa da entrega dos dias novos.
+    - `defeitos`, ao contrário, cobre só os lotes do intervalo: o `avancar_tempo` os
+      acrescenta à tabela.
     """
 
     lotes: list[Lote] = field(default_factory=list)
