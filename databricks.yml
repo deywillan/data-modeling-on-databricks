@@ -1,0 +1,30 @@
+# Bundle único da série "Um caminho para implementação da Arquitetura Medalhão".
+#
+# Sem host nem perfil fixos: use o perfil da sua CLI, por exemplo
+#   databricks bundle deploy -p <seu-perfil>
+#   databricks bundle run 01_setup -p <seu-perfil>
+#
+# Cada pasta de artigo declara os próprios recursos em <pasta>/resources/, e cada artigo
+# roda isoladamente. O gerador de dados (00-gerador/) vira um wheel construído no deploy.
+
+bundle:
+  name: data-modeling-on-databricks
+
+include:
+  - "*/resources/*.yml"
+
+variables:
+  sufixo_catalogo:
+    description: Sufixo acrescentado ao nome do catálogo de cada artigo. Deixe vazio; serve só para testes.
+    default: ""
+
+artifacts:
+  gerador:
+    type: whl
+    path: ./00-gerador
+    build: uv build --wheel
+
+targets:
+  dev:
+    mode: development
+    default: true
