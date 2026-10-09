@@ -13,14 +13,76 @@ sessão e fica no cache local entre sessões (`--sem-cache` ignora o cache). A e
 deixa de fora os testes marcados como `lento` (gerações extras para comparar determinismo e
 geração em partes, fatias inteiras, Unity Catalog). Rode-os nos tickets de marco com
 `pytest -m "lento or not lento"`.
+
+Pré-aquecimento: as gerações que os testes selecionados pedem rodam em paralelo (até
+`GERACOES_EM_PARALELO` por vez, na mesma sessão Connect) logo depois da coleta, em vez de
+uma depois da outra na primeira vez em que algum teste pede a fixture. O tempo na parede cai
+para o da geração mais longa; o trabalho no workspace é o mesmo.
 """
 
+import atexit
 import os
+import shutil
+import tempfile
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 
 import geracoes
 import pytest
 
 from modelbricks_gerador import DestinoLocal
+
+
+GERACOES_EM_PARALELO = 3
+# Fixture → geração, na ordem em que o pré-aquecimento as inicia (as mais longas primeiro).
+_GERACOES = {
+    "principal_em_partes": geracoes.PRINCIPAL_EM_PARTES,
+    "principal": geracoes.PRINCIPAL,
+    "legados": geracoes.LEGADOS,
+    "legados_em_partes": geracoes.LEGADOS_EM_PARTES,
+    "patio": geracoes.PATIO,
+    "patio_em_partes": geracoes.PATIO_EM_PARTES,
+    "mundo_de_novo": geracoes.MUNDO,
+}
+_SEM_CACHE_SEMPRE = {"mundo_de_novo"}
+_PROMETIDAS: dict[str, Future] = {}
+_SESSAO = threading.Lock()
+
+
+def _perfil_definido() -> bool:
+    return bool(os.environ.get("DATABRICKS_CONFIG_PROFILE") or os.environ.get("DATABRICKS_HOST"))
+
+
+def _abrir_sessao():
+    from databricks.connect import DatabricksSession
+
+    with _SESSAO:
+        return DatabricksSession.builder.serverless().getOrCreate()
+
+
+def _gerar(nome: str, usar_cache: bool):
+    # Dentro do diretório do cache (ignorado pelo git): o temporário do sistema pode ser um
+    # link simbólico, o que quebra os caminhos relativos do destino local.
+    geracoes.CACHE.mkdir(exist_ok=True)
+    pasta = tempfile.mkdtemp(prefix=f".temporario-{nome}-", dir=geracoes.CACHE)
+    atexit.register(shutil.rmtree, pasta, ignore_errors=True)
+    return geracoes.obter(_GERACOES[nome], Path(pasta), _abrir_sessao, usar_cache=usar_cache)
+
+
+def pytest_collection_finish(session):
+    """Inicia em paralelo as gerações que os testes selecionados pedem."""
+    if not _perfil_definido():
+        return
+    pedidas = {f for item in session.items for f in item.fixturenames}
+    nomes = [n for n in _GERACOES if n in pedidas]
+    if len(nomes) < 2:
+        return
+    usar_cache = not session.config.getoption("--sem-cache")
+    executor = ThreadPoolExecutor(max_workers=GERACOES_EM_PARALELO, thread_name_prefix="geracao")
+    for nome in nomes:
+        _PROMETIDAS[nome] = executor.submit(_gerar, nome, usar_cache and nome not in _SEM_CACHE_SEMPRE)
+    executor.shutdown(wait=False)
 
 
 def pytest_addoption(parser):
@@ -47,6 +109,9 @@ def destino(tmp_path):
 
 
 def _obter(geracao: geracoes.Geracao, request, tmp_path_factory) -> geracoes.Gerada:
+    prometida = _PROMETIDAS.get(request.fixturename)
+    if prometida is not None:
+        return prometida.result()
     return geracoes.obter(
         geracao,
         tmp_path_factory.mktemp(geracao.nome),
@@ -98,6 +163,8 @@ def patio_em_partes(request, tmp_path_factory):
 @pytest.fixture(scope="session")
 def mundo_de_novo(request, tmp_path_factory):
     """O mundo verdadeiro gerado de novo, sempre sem cache, para comparar com o da principal."""
+    if "mundo_de_novo" in _PROMETIDAS:
+        return _PROMETIDAS["mundo_de_novo"].result()
     return geracoes.obter(
         geracoes.MUNDO, tmp_path_factory.mktemp("mundo"), lambda: request.getfixturevalue("spark"), usar_cache=False,
     )
