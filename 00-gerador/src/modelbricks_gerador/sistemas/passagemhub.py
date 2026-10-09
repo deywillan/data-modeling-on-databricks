@@ -101,6 +101,8 @@ class _Projecao:
         ))
 
     def mapa_chaves(self) -> "DataFrame":
+        """Mapa acumulado: todos os clientes e trechos da Viação, qualquer que seja o
+        intervalo pedido (o `avancar_tempo` regrava `gabarito.mapa_chaves` inteira)."""
         return mapa(self.clientes, SISTEMA, ENTIDADE, "id_cliente", "pessoas", "id_pessoa").unionByName(
             mapa(self.trechos, SISTEMA, ENTIDADE, "cod_trecho", "rotas", "id_rota")
         )
