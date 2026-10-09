@@ -11,7 +11,7 @@ pela API.
 from collections.abc import Callable
 from datetime import date
 
-from . import apolice, embarque, ibge, nucleo, passagemhub, patio, rastro, rotacerta
+from . import apolice, embarque, ibge, nucleo, passagemhub, patio, rastro, rotacerta, solfin, solticket
 from .base import Contexto, Entrega, Lote
 
 Projecao = Callable[[Contexto, date, date], Entrega]
@@ -25,6 +25,8 @@ PROJECOES: dict[str, Projecao] = {
     "patio": patio.projetar,
     "rastro": rastro.projetar,
     "rotacerta": rotacerta.projetar,
+    "solfin": solfin.projetar,
+    "solticket": solticket.projetar,
 }
 
 __all__ = ["Contexto", "Entrega", "Lote", "Projecao", "PROJECOES"]

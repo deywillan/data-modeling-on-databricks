@@ -214,6 +214,34 @@ class ParametrosApolice(_Modelo):
     cancelamento: float = Field(ge=0, le=1)
 
 
+class ParametrosLegados(_Modelo):
+    """Entrega dos legados do Expresso Vale do Sol (*SolTicket* e *SolFin*)."""
+
+    snapshots: AgendaSnapshots  # `desde` é a data da aquisição
+
+
+class ParametrosSolTicket(_Modelo):
+    """Comportamento da bilhetagem legada do Expresso Vale do Sol (*SolTicket*)."""
+
+    canais: dict[str, float] = Field(min_length=1)
+    horario_vendas: Intervalo  # horas do dia (início inclusive, fim exclusive)
+    antecedencia_compra_dias: Intervalo
+    poltronas: int = Field(gt=0)
+    cancelamento: float = Field(ge=0, le=1)
+
+
+class ParametrosSolFin(_Modelo):
+    """Comportamento do ERP legado do Expresso Vale do Sol (*SolFin*)."""
+
+    fornecedores: float = Field(gt=0, le=1)  # fração das empresas PJ
+    titulos_pagar: int = Field(gt=0)  # títulos na carga histórica, na escala 1
+    horario_expediente: Intervalo
+    categorias_despesa: dict[str, float] = Field(min_length=1)
+    valor_titulo: Intervalo
+    prazo_vencimento_dias: Intervalo
+    dias_pagamento_apos_vencimento: Intervalo
+
+
 class Parametros(_Modelo):
     pessoas_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
     eventos_por_frete: Intervalo
@@ -225,6 +253,9 @@ class Parametros(_Modelo):
     rotacerta: ParametrosRotaCerta
     patio: ParametrosPatio
     apolice: ParametrosApolice
+    legados: ParametrosLegados
+    solticket: ParametrosSolTicket
+    solfin: ParametrosSolFin
 
 
 class Periodo(_Modelo):
@@ -354,6 +385,7 @@ class Roteiro(_Modelo):
         erros += self._coerencia_do_rotacerta()
         erros += self._coerencia_do_patio()
         erros += self._coerencia_do_apolice()
+        erros += self._coerencia_dos_legados()
         for nome, evento in self.eventos.items():
             erros += [f"eventos.{nome}: sistema desconhecido '{s}'" for s in evento.sistemas if s not in self.sistemas]
         for nome, defeito in self.defeitos.items():
@@ -576,6 +608,36 @@ class Roteiro(_Modelo):
             pesos = getattr(p, nome)
             if any(v < 0 for v in pesos.values()) or sum(pesos.values()) <= 0:
                 erros.append(f"parametros.apolice.{nome}: pesos devem ser não negativos com soma positiva")
+        return erros
+
+    def _coerencia_dos_legados(self) -> list[str]:
+        erros = []
+        p = self.parametros
+        aquisicao = self.eventos.get("aquisicao_expresso_vale_do_sol")
+        if aquisicao is None:
+            erros.append("eventos.aquisicao_expresso_vale_do_sol: falta o evento")
+        elif p.legados.snapshots.desde != aquisicao.data:
+            erros.append("parametros.legados.snapshots.desde deve ser a data da aquisição do Expresso Vale do Sol")
+        intervalos = {
+            "solticket.horario_vendas": p.solticket.horario_vendas,
+            "solticket.antecedencia_compra_dias": p.solticket.antecedencia_compra_dias,
+            "solfin.horario_expediente": p.solfin.horario_expediente,
+            "solfin.valor_titulo": p.solfin.valor_titulo,
+            "solfin.prazo_vencimento_dias": p.solfin.prazo_vencimento_dias,
+            "solfin.dias_pagamento_apos_vencimento": p.solfin.dias_pagamento_apos_vencimento,
+        }
+        for nome, intervalo in intervalos.items():
+            if intervalo.minimo > intervalo.maximo:
+                erros.append(f"parametros.{nome}.minimo é maior que o máximo")
+        for nome in ("solticket.horario_vendas", "solfin.horario_expediente"):
+            intervalo = intervalos[nome]
+            if intervalo.minimo < 1 or intervalo.maximo > 23 or intervalo.minimo == intervalo.maximo:
+                erros.append(f"parametros.{nome} deve ficar entre 1 e 23 h, com fim depois do início")
+        if p.solfin.prazo_vencimento_dias.minimo < 1 or p.solfin.valor_titulo.minimo < 1:
+            erros.append("parametros.solfin: prazo_vencimento_dias e valor_titulo começam em 1")
+        for nome, pesos in (("solticket.canais", p.solticket.canais), ("solfin.categorias_despesa", p.solfin.categorias_despesa)):
+            if any(v < 0 for v in pesos.values()) or sum(pesos.values()) <= 0:
+                erros.append(f"parametros.{nome}: pesos devem ser não negativos com soma positiva")
         return erros
 
     def fatia(self, artigo: str) -> Fatia:
