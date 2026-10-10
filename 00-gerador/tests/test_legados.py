@@ -127,8 +127,9 @@ def test_os_arquivos_sao_csv_ponto_e_virgula_em_latin1(gerado):
             com_acento.add((sistema, entidade))
             with pytest.raises(UnicodeDecodeError):
                 conteudo.decode("utf-8")
-    assert {("solticket", "clientes"), ("solticket", "linhas"), ("solfin", "fornecedores"),
-            ("solfin", "titulos_pagar")} <= com_acento
+    # As linhas do SolTicket são poucas na escala do teste (as rotas do Vale do Sol): o texto delas
+    # só tem acento se o sorteio dos municípios cair em algum nome acentuado, então não entram aqui.
+    assert {("solticket", "clientes"), ("solfin", "fornecedores"), ("solfin", "titulos_pagar")} <= com_acento
 
 
 def test_latin1_registrado_por_arquivo_no_gabarito(gerado):
