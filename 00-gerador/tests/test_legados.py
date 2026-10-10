@@ -57,11 +57,21 @@ def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
     return geracoes.gabarito(destino)
 
 
+def _copias(gabarito, sistema: str) -> set[str]:
+    """Chaves das cópias duplicadas de pessoas (registradas como defeito) no sistema."""
+    return {
+        r["valor_sujo"] for r in gabarito["defeitos"]
+        if r["sistema"] == sistema and r["tipo"] == "pessoa_duplicada_no_sistema"
+    }
+
+
 def _mapa(gabarito, sistema: str, entidade: str) -> dict[int, str]:
+    """id verdadeiro → chave do sistema, sem as chaves das cópias duplicadas (uma por pessoa)."""
+    copias = _copias(gabarito, sistema)
     return {
         m["id_verdadeiro"]: m["chave_sistema"]
         for m in gabarito["mapa_chaves"]
-        if m["sistema"] == sistema and m["entidade"] == entidade
+        if m["sistema"] == sistema and m["entidade"] == entidade and m["chave_sistema"] not in copias
     }
 
 
@@ -188,6 +198,25 @@ def test_clientes_do_vale_do_sol_se_sobrepoem_aos_do_embarque_com_outra_chave(ge
     assert set(_mapa(gabarito, "solfin", "fornecedores")) <= {e["id_empresa"] for e in gabarito["empresas_pj"]}
 
 
+@pytest.mark.parametrize("sistema, coluna", [("solticket", "cod_cliente"), ("embarque", "id_cliente")])
+def test_copias_duplicadas_de_pessoas_entram_no_mapa_com_o_id_da_pessoa_original(gerado, sistema, coluna):
+    _, _, _, gabarito = gerado
+    registradas = [
+        (r["valor_original"], r["valor_sujo"]) for r in gabarito["defeitos"]
+        if r["sistema"] == sistema and r["tipo"] == "pessoa_duplicada_no_sistema"
+    ]
+    assert registradas, f"{sistema}: nenhuma cópia duplicada registrada"
+    mapa = {
+        m["chave_sistema"]: m["id_verdadeiro"]
+        for m in gabarito["mapa_chaves"] if m["sistema"] == sistema and m["coluna"] == coluna
+    }
+
+    for original, copia in registradas:
+        assert copia != original
+        assert copia in mapa, f"{sistema}: a cópia {copia} não está no mapa de chaves"
+        assert mapa[copia] == mapa[original], f"{sistema}: a cópia {copia} aponta para outra pessoa"
+
+
 def _dentro_da_tolerancia(observados: int, populacao: int, taxa: float) -> bool:
     desvio = math.sqrt(taxa * (1 - taxa) / populacao)
     return abs(observados / populacao - taxa) <= 4 * desvio + 1 / populacao
@@ -216,7 +245,10 @@ def test_defeitos_do_solticket_aparecem_na_taxa_do_roteiro_e_estao_registrados(g
 
     # Cada cliente da landing é uma pessoa do mundo, pela chave original ou pela da cópia.
     original_da_copia = {sujo: orig for orig, sujo in registrados["pessoa_duplicada_no_sistema"]}
-    id_da_chave = {v: k for k, v in _mapa(gabarito, "solticket", "clientes").items()}
+    id_da_chave = {
+        m["chave_sistema"]: m["id_verdadeiro"]
+        for m in gabarito["mapa_chaves"] if m["sistema"] == "solticket" and m["entidade"] == "clientes"
+    }
     clientes = ultima["clientes"]
     assert set(original_da_copia) <= set(clientes)
     observados = defaultdict(set)

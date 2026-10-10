@@ -96,20 +96,31 @@ class _Projecao:
             "cod_municipio_origem", "cod_municipio_destino", "distancia_km", "tarifa_base AS tarifa",
         ))
 
+    @property
+    def alvo_clientes(self) -> Alvo:
+        return Alvo("clientes", ("cod_cliente",), "pessoas", "_id_verdadeiro")
+
+    def chave_da_copia(self, coluna_id: str) -> str:
+        """Chave do sistema da cópia duplicada de um cliente (id verdadeiro deslocado para fora do mundo)."""
+        return self.chave("clientes", f"({coluna_id} + {_FORA_DO_MUNDO_CLIENTES})", 8)
+
     def mapa_chaves(self) -> "DataFrame":
-        """Mapa acumulado: clientes cadastrados até `fim` e todas as linhas."""
+        """Mapa acumulado: clientes cadastrados até `fim`, as cópias duplicadas deles e todas as linhas."""
         clientes = self.clientes.where(f"data_cadastro <= DATE'{self.fim.isoformat()}'")
-        return mapa(clientes, SISTEMA, "clientes", "cod_cliente", "pessoas", "_id_verdadeiro").unionByName(
-            mapa(self.linhas, SISTEMA, "linhas", "cod_linha", "rotas", "_id_verdadeiro")
+        copias = self.defeitos.copias_de_pessoas(
+            clientes, self.alvo_clientes, {"cod_cliente": self.chave_da_copia("_id_verdadeiro")})
+        return (
+            mapa(clientes, SISTEMA, "clientes", "cod_cliente", "pessoas", "_id_verdadeiro")
+            .unionByName(mapa(copias, SISTEMA, "clientes", "cod_cliente", "pessoas", "_id_verdadeiro"))
+            .unionByName(mapa(self.linhas, SISTEMA, "linhas", "cod_linha", "rotas", "_id_verdadeiro"))
         )
 
     # -- defeitos ---------------------------------------------------------------------------
 
     def sujar_clientes(self, df: "DataFrame") -> "DataFrame":
         d = self.defeitos
-        alvo = Alvo("clientes", ("cod_cliente",), "pessoas", "_id_verdadeiro")
-        copia = self.chave("clientes", f"(_id_verdadeiro + {_FORA_DO_MUNDO_CLIENTES})", 8)
-        df = d.pessoa_duplicada_no_sistema(df, alvo, {"cod_cliente": copia})
+        alvo = self.alvo_clientes
+        df = d.pessoa_duplicada_no_sistema(df, alvo, {"cod_cliente": self.chave_da_copia("_id_verdadeiro")})
         df = d.cpf_fora_do_padrao(df, alvo, "cpf")
         df = d.nome_abreviado_ou_com_erro(df, alvo, "nome")
         return d.municipio_fora_do_padrao(df, alvo, "cod_municipio")

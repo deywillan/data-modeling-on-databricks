@@ -99,10 +99,22 @@ class _Projecao:
         percentual = self.reajuste.parametros["percentual"]
         return f"cast(round({coluna} * (1 + {percentual!r}), 2) AS decimal(10,2))"
 
+    @property
+    def alvo_clientes(self) -> Alvo:
+        return Alvo("clientes", ("id_cliente",), "pessoas", "_id_verdadeiro")
+
+    def chave_da_copia(self, coluna_id: str) -> str:
+        """Chave do sistema da cópia duplicada de um cliente (id verdadeiro deslocado para fora do mundo)."""
+        return self.chave("clientes", f"({coluna_id} + {_FORA_DO_MUNDO_CLIENTES})", 8)
+
     def mapa_chaves(self) -> "DataFrame":
+        """Mapa acumulado: todos os clientes, as cópias duplicadas deles e as linhas/tarifas."""
         linhas = self.linhas
+        copias = self.defeitos.copias_de_pessoas(
+            self.clientes, self.alvo_clientes, {"id_cliente": self.chave_da_copia("id_pessoa")})
         return (
             mapa(self.clientes, SISTEMA, "clientes", "id_cliente", "pessoas", "id_pessoa")
+            .unionByName(mapa(copias, SISTEMA, "clientes", "id_cliente", "pessoas", "id_pessoa"))
             .unionByName(mapa(linhas, SISTEMA, "tarifas", "id_tarifa", "rotas", "id_rota"))
             .unionByName(mapa(linhas, SISTEMA, "tarifas", "cod_linha", "rotas", "id_rota"))
         )
@@ -111,9 +123,8 @@ class _Projecao:
 
     def sujar_clientes(self, df: "DataFrame") -> "DataFrame":
         d = self.defeitos
-        alvo = Alvo("clientes", ("id_cliente",), "pessoas", "_id_verdadeiro")
-        copia = self.chave("clientes", f"(_id_verdadeiro + {_FORA_DO_MUNDO_CLIENTES})", 8)
-        df = d.pessoa_duplicada_no_sistema(df, alvo, {"id_cliente": copia})
+        alvo = self.alvo_clientes
+        df = d.pessoa_duplicada_no_sistema(df, alvo, {"id_cliente": self.chave_da_copia("_id_verdadeiro")})
         df = d.cpf_fora_do_padrao(df, alvo, "cpf")
         df = d.nome_abreviado_ou_com_erro(df, alvo, "nome")
         df = d.contato_nulo(df, alvo, ("email", "telefone"))

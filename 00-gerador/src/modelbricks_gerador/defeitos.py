@@ -165,12 +165,30 @@ class Defeitos:
         from pyspark.sql import functions as F
 
         df = self._com_anotacoes(df)
-        copias = df.where(self._sorteado(tipo, alvo)).withColumn("_chave_original", self._chave_texto(alvo))
-        for coluna, expressao in nova_chave.items():
-            copias = copias.withColumn(coluna, F.expr(expressao).cast(df.schema[coluna].dataType))
+        copias = self._copias_de_pessoas(df, alvo, nova_chave)
         anotacao = self._anotacao(tipo, alvo, ",".join(alvo.chave), F.col("_chave_original"), self._chave_texto(alvo))
         copias = copias.withColumn("_defeitos", _lista(anotacao)).drop("_chave_original")
         return df.unionByName(copias)
+
+    def copias_de_pessoas(self, df: "DataFrame", alvo: Alvo, nova_chave: dict[str, str]) -> "DataFrame":
+        """As cópias que `pessoa_duplicada_no_sistema` acrescentaria a `df`, sem anotação: as
+        linhas sorteadas, com a chave trocada por `nova_chave`. `df` precisa ter as colunas da
+        chave do alvo e as que as expressões de `nova_chave` usam. Vazio se o defeito não está
+        ativo no sistema. A projeção usa as chaves das cópias para completar o mapa de chaves do
+        gabarito, e o sorteio é o mesmo que decide a cópia nos lotes."""
+        if not self._ativo("pessoa_duplicada_no_sistema"):
+            return df.where("false")
+        return self._copias_de_pessoas(df, alvo, nova_chave).drop("_chave_original")
+
+    def _copias_de_pessoas(self, df: "DataFrame", alvo: Alvo, nova_chave: dict[str, str]) -> "DataFrame":
+        """Linhas sorteadas com a chave trocada; `_chave_original` guarda o texto da chave antes da troca."""
+        from pyspark.sql import functions as F
+
+        copias = df.where(self._sorteado("pessoa_duplicada_no_sistema", alvo)).withColumn(
+            "_chave_original", self._chave_texto(alvo))
+        for coluna, expressao in nova_chave.items():
+            copias = copias.withColumn(coluna, F.expr(expressao).cast(df.schema[coluna].dataType))
+        return copias
 
     # -- defeitos de linha: entrega ----------------------------------------------------------
 
