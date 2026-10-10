@@ -16,7 +16,7 @@ roteiro.yaml ──► mundo verdadeiro ──► projeção de cada sistema ─
 2. **Projeção por sistema.** Cada sistema de origem enxerga só a parte do mundo que lhe interessa e a registra do seu jeito: com chave própria, grafia própria (o mesmo cliente pode aparecer em maiúsculas num sistema e com o CPF sem máscara em outro), o seu padrão de entrega e os seus defeitos.
 3. **Landing.** O resultado é gravado **só como arquivos** no Volume `landing` do schema de cada sistema, no catálogo Bronze do artigo. O gerador nunca cria tabelas nos catálogos Bronze, Silver e Gold (a única exceção é o `gabarito`, no Silver, nas fatias que o têm): quem os popula é o pipeline do artigo, lendo a landing como numa ingestão real.
 
-O mundo verdadeiro é sempre gerado inteiro, em qualquer artigo. Por isso, o mesmo cliente tem os mesmos dados em todos os artigos; muda só quais sistemas vão para a landing.
+O mundo verdadeiro é sempre gerado inteiro, em qualquer artigo. Por isso, o mesmo cliente tem os mesmos dados em todos os artigos; muda só quais sistemas vão para a landing e, nos artigos sem gabarito, a ausência dos defeitos (veja o catálogo de defeitos, abaixo).
 
 ## Sistemas de origem
 
@@ -107,7 +107,7 @@ O parâmetro `escala` do `<NN>_setup` multiplica linearmente os volumes do rotei
 
 Nas populações distribuídas entre empresas (rotas, bases, lojas e colaboradores), o roteiro garante ao menos uma instância por empresa (`mundo.minimo_por_empresa`), de modo que mesmo a escala `0.01` entrega todas as divisões com dados (a Viação, por exemplo, sempre tem rota e passagens).
 
-Na escala 1, no Free Edition, o `<NN>_setup` leva de poucos minutos (cerca de 4 minutos para o artigo 01 e para o 05) a cerca de 6 minutos (artigo 10, com todos os sistemas e cerca de 2 GB na landing). O job imprime, por sistema, os arquivos, o tamanho e o tempo de geração e de gravação. Para conferir o que o setup deixou no catálogo, use `scripts/conferir_catalogo.py <artigo> <ambiente>` (por exemplo, `01-bronze dev`): ele resume os catálogos, os schemas por sistema e a landing de cada sistema (`--arquivos` lista cada arquivo).
+Na escala 1, no Free Edition, o `<NN>_setup` leva de poucos minutos (cerca de 4 minutos para o artigo 01 e para o 05) a cerca de 6 minutos (artigo 10, com todos os sistemas e cerca de 2 GB na landing). O job imprime, por sistema, os arquivos, o tamanho e o tempo de geração e de gravação. Para conferir o que o setup deixou no catálogo, rode, a partir de `00-gerador/`, `DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py <artigo> <ambiente>` (por exemplo, `01-bronze dev`): ele resume os catálogos, os schemas por sistema e a landing de cada sistema (`--arquivos` lista cada arquivo; `--relogio AAAA-MM-DD` confere a data do relógio simulado). Para exercitar o ciclo inteiro de um artigo num ambiente descartável (setup, setup repetido, `avancar_tempo`, `reset` e limpeza), há o `scripts/teste_fumaca.sh <seu-perfil> [artigo] [escala]`, que usa o ambiente `fumaca` (ou o de `AMBIENTE=...`) e nunca toca em `dev` nem em `prd`.
 
 ### Eventos com data
 
@@ -173,7 +173,7 @@ Os testes chamam a API pública com um destino em diretório local e inspecionam
 - os testes não geram dados por conta própria: pedem uma das gerações compartilhadas de `tests/geracoes.py` (fixtures de sessão em `tests/conftest.py`), e cada geração roda no máximo uma vez por execução do pytest;
 - o resultado de cada geração fica em `00-gerador/.cache-testes/` (fora do Git), sob o hash do código do gerador e do roteiro. Enquanto o código não muda, uma nova execução não abre sessão no workspace. `--sem-cache` gera tudo de novo;
 - logo depois da coleta, as gerações que os testes escolhidos pedem rodam em paralelo (até três por vez, na mesma sessão), em vez de uma depois da outra;
-- a execução padrão deixa de fora os testes marcados como `lento` (gerações extras de determinismo e de geração em partes, fatias inteiras dos artigos e o Unity Catalog). Com o cache vazio, a execução padrão leva cerca de 9 minutos; com o cache cheio, menos de 30 segundos.
+- a execução padrão deixa de fora os testes marcados como `lento` (gerações extras de determinismo e de geração em partes, fatias inteiras dos artigos e o Unity Catalog). Com o cache vazio, a execução padrão leva cerca de 9 minutos e a suíte completa, cerca de 28; com o cache cheio, a execução padrão leva menos de 30 segundos.
 
 ```bash
 cd 00-gerador
