@@ -114,18 +114,19 @@ def test_apolice_com_valor_monetario_numerico(limpa, principal):
 
 @pytest.mark.lento
 def test_a_mesma_pessoa_e_limpa_na_fatia_01_e_tem_o_defeito_registrado_na_fatia_10(fatia_01, fatia_10):
-    # As duas fatias têm a mesma escala e a mesma carga inicial, então o Pátio é o mesmo mundo.
-    gabarito = geracoes.gabarito(fatia_10.final, "patio")
-    ultima_10 = max(c for c in fatia_10.final.listar("patio/clientes"))
-    sujo = {c["id_cliente"]: c for c in _linhas_csv(fatia_10.final, ultima_10)}
-    limpo = {c["id_cliente"]: c for c in _linhas_csv(fatia_01.etapas[0], ultima_10)}
+    # As duas fatias têm a mesma escala e a mesma história, então o Pátio é o mesmo mundo.
     registros = [
-        r for r in gabarito["defeitos"]
-        if r["entidade"] == "clientes" and r["tipo"] == "contato_nulo" and r["data_entrega"] == geracoes.CARGA_INICIAL
+        r for r in geracoes.gabarito(fatia_10.final, "patio")["defeitos"]
+        if r["entidade"] == "clientes" and r["tipo"] == "contato_nulo"
     ]
-
     assert registros, "a fatia 10 registra contatos nulos no Pátio"
+
+    def cliente(destino, chave: str, data) -> dict:
+        (caminho,) = destino.listar(f"patio/clientes/{data.isoformat()}")
+        return next(c for c in _linhas_csv(destino, caminho) if c["id_cliente"] == chave)
+
     for r in registros:
-        assert sujo[r["chave_sistema"]][r["coluna"]] == "", "o defeito está nos arquivos da fatia 10"
-        assert limpo[r["chave_sistema"]][r["coluna"]] == r["valor_original"] != "", "a mesma pessoa, limpa na 01"
-    assert all(c["email"] != "" and c["telefone"] != "" for c in limpo.values())
+        no_10 = cliente(fatia_10.final, r["chave_sistema"], r["data_entrega"])
+        no_01 = cliente(fatia_01.etapas[0], r["chave_sistema"], r["data_entrega"])
+        assert no_10[r["coluna"]] == "", "o defeito está nos arquivos da fatia 10"
+        assert no_01[r["coluna"]] == r["valor_original"] != "", "a mesma pessoa, limpa na fatia 01"

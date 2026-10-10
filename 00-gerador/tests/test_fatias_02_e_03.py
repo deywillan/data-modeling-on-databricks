@@ -135,12 +135,17 @@ def test_o_mesmo_cliente_tem_os_mesmos_dados_nos_artigos_02_e_03(fatia_02, fatia
     mesmos dados nas duas, exceto onde a 03 registra um defeito (e ali a 02 tem o valor original)."""
     limpa, suja = fatia_02.final, fatia_03.final
     assert _linhas_json(limpa, "embarque") == _linhas_json(suja, "embarque")
-    assert _linhas_parquet(limpa, "nucleo") == _linhas_parquet(suja, "nucleo")
+    # No Núcleo, o evento atrasado da 03 pode chegar depois da carga inicial (até 3 dias de atraso):
+    # tudo o que a 03 entregou a 02 também entregou, e a 02 tem a mais só as versões dos últimos dias.
+    no_02, no_03 = _linhas_parquet(limpa, "nucleo"), _linhas_parquet(suja, "nucleo")
+    assert no_03 <= no_02
+    assert all(dict(linha)["updated_at"] >= "2025-12-28" for _, linha in no_02 - no_03)
 
     caminhos = limpa.listar("patio")
     assert caminhos == suja.listar("patio")
+    # O defeito de um cliente persiste nos snapshots seguintes, então vale por (entidade, chave, coluna).
     registrados = {
-        (r["data_entrega"].isoformat(), r["entidade"], r["chave_sistema"], r["coluna"]): r["valor_original"]
+        (r["entidade"], r["chave_sistema"], r["coluna"]): r["valor_original"]
         for r in geracoes.gabarito(suja, "patio")["defeitos"]
     }
     assert registrados, "a 03 registra defeitos do Pátio"
@@ -151,7 +156,7 @@ def test_o_mesmo_cliente_tem_os_mesmos_dados_nos_artigos_02_e_03(fatia_02, fatia
         for chave, linha in no_03.items():
             for coluna, valor in linha.items():
                 if valor != no_02[chave][coluna]:
-                    assert registrados[(data_foto, entidade, chave, coluna)] == no_02[chave][coluna], (caminho, chave, coluna)
+                    assert registrados[(entidade, chave, coluna)] == no_02[chave][coluna], (caminho, chave, coluna)
 
 
 @pytest.mark.lento
