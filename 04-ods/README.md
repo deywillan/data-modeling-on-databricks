@@ -32,7 +32,7 @@ Os sistemas deste artigo, um schema por sistema no catálogo Bronze:
 
 Os arquivos ficam em `/Volumes/a04_bronze_dev/<sistema>/landing/<entidade>/<AAAA-MM-DD>/`, em que a data é o dia simulado em que o lote chegou. O relógio simulado fica em `/Volumes/a04_bronze_dev/_controle/relogio/`; os pipelines leem só os schemas dos sistemas, nunca o `_controle`. O [README do gerador](../00-gerador/README.md) explica de onde vêm esses dados, o relógio e o roteiro. Os arquivos deste artigo saem sem defeitos: o catálogo de defeitos só é injetado nos artigos que têm gabarito.
 
-Os sistemas em comum com os outros artigos trazem os mesmos dados neles: o mesmo cliente tem os mesmos cadastros, com as mesmas chaves. Cada artigo tem os seus catálogos e roda sem os outros.
+Os sistemas em comum com os outros artigos trazem os mesmos dados neles: o mesmo cliente tem os mesmos cadastros, com as mesmas chaves, exceto pelos defeitos, que só existem nos artigos com gabarito (03, 05, 06 e 10). Cada artigo tem os seus catálogos e roda sem os outros.
 
 Parâmetros do job:
 

@@ -10,7 +10,11 @@
 # o dia seguinte e chegam lotes novos), roda com reset (recria do zero, relógio de volta à carga
 # inicial) e, no fim, destrói o deploy e apaga os três catálogos de teste.
 #
-# Para não colidir com outra execução, mude o ambiente (AMBIENTE=t19 ...) e, se o nome do bundle
+# Variáveis de ambiente (opcionais):
+#   AMBIENTE  ambiente dos catálogos de teste (padrão "fumaca"; ex.: AMBIENTE=t20 00-gerador/scripts/...)
+#
+# O script apaga os catálogos do ambiente informado, então recusa "dev" e "prd", que são os do uso
+# real do bundle. Para não colidir com outra execução, mude o ambiente e, se o nome do bundle
 # também puder colidir, troque `bundle.name` só localmente (sem commitar) durante o teste.
 set -euo pipefail
 
@@ -18,6 +22,9 @@ PERFIL="${1:?informe o perfil da CLI}"
 ARTIGO="${2:-01-bronze}"
 ESCALA="${3:-0.01}"
 AMBIENTE="${AMBIENTE:-fumaca}"
+case "$AMBIENTE" in
+  dev|prd) echo "Ambiente '$AMBIENTE' é o do uso real: o teste apagaria os seus catálogos. Use outro (ex.: AMBIENTE=fumaca)." >&2; exit 2 ;;
+esac
 JOB="${ARTIGO%%-*}_setup"
 python_gerador() { (cd 00-gerador && uv run python -c "$1"); }
 CARGA="$(python_gerador "from modelbricks_gerador import carregar_roteiro; print(carregar_roteiro().datas.carga_inicial)")"
