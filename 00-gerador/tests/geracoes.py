@@ -142,6 +142,8 @@ ESCALA_FATIA_INTEIRA = 0.03
 FATIA_01 = Geracao(  # carga inicial e avanço de 1 dia (test_gerar_fatia)
     "fatia_01", "01-bronze", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL), ("avancar", 1)),
 )
+FATIA_02 = Geracao("fatia_02", "02-historizacao", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
+FATIA_03 = Geracao("fatia_03", "03-3fn", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
 FATIA_05 = Geracao("fatia_05", "05-raw-vault", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
 FATIA_10 = Geracao("fatia_10", "10-data-marts", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
 
