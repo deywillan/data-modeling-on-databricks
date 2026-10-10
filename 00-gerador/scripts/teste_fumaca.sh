@@ -4,50 +4,56 @@
 # Uso, a partir da raiz do repositório:
 #   00-gerador/scripts/teste_fumaca.sh <perfil-da-cli> [artigo] [escala]
 #
-# Faz deploy do bundle com um catálogo de teste (sufixo _fumaca), roda o setup do artigo,
-# confere o catálogo, roda de novo sem reset (nada muda), avança o relógio em 1 dia com o job
-# avancar_tempo (o relógio passa para o dia seguinte e chegam lotes novos), roda com reset
-# (recria do zero, relógio de volta à carga inicial) e, no fim, destrói o deploy e apaga o
-# catálogo de teste.
+# Faz deploy do bundle com um ambiente de teste (variável `ambiente`, padrão "fumaca", o que dá
+# catálogos como a01_bronze_fumaca), roda o setup do artigo, confere os catálogos, roda de novo
+# sem reset (nada muda), avança o relógio em 1 dia com o job avancar_tempo (o relógio passa para
+# o dia seguinte e chegam lotes novos), roda com reset (recria do zero, relógio de volta à carga
+# inicial) e, no fim, destrói o deploy e apaga os três catálogos de teste.
+#
+# Para não colidir com outra execução, mude o ambiente (AMBIENTE=t19 ...) e, se o nome do bundle
+# também puder colidir, troque `bundle.name` só localmente (sem commitar) durante o teste.
 set -euo pipefail
 
 PERFIL="${1:?informe o perfil da CLI}"
 ARTIGO="${2:-01-bronze}"
 ESCALA="${3:-0.01}"
-SUFIXO="${SUFIXO:-_fumaca}"  # sobrescreva para isolar execuções paralelas
+AMBIENTE="${AMBIENTE:-fumaca}"
 JOB="${ARTIGO%%-*}_setup"
-CARGA="$(cd 00-gerador && uv run python -c "from modelbricks_gerador import carregar_roteiro; print(carregar_roteiro().datas.carga_inicial)")"
-DIA_SEGUINTE="$(cd 00-gerador && uv run python -c "from datetime import timedelta; from modelbricks_gerador import carregar_roteiro; print(carregar_roteiro().datas.carga_inicial + timedelta(days=1))")"
-CATALOGO="$(cd 00-gerador && uv run python -c "from modelbricks_gerador import carregar_roteiro; print(carregar_roteiro().fatia('$ARTIGO').catalogo)")${SUFIXO}"
+python_gerador() { (cd 00-gerador && uv run python -c "$1"); }
+CARGA="$(python_gerador "from modelbricks_gerador import carregar_roteiro; print(carregar_roteiro().datas.carga_inicial)")"
+DIA_SEGUINTE="$(python_gerador "from datetime import timedelta; from modelbricks_gerador import carregar_roteiro; print(carregar_roteiro().datas.carga_inicial + timedelta(days=1))")"
+CATALOGOS="$(python_gerador "from modelbricks_gerador import catalogos_do_artigo; print(*catalogos_do_artigo('$ARTIGO', '$AMBIENTE').values())")"
 
 conferir() {  # $1 (opcional): data em que o relógio simulado deve estar
-  (cd 00-gerador && DATABRICKS_CONFIG_PROFILE="$PERFIL" uv run python scripts/conferir_catalogo.py "$CATALOGO" ${1:+--relogio "$1"})
+  (cd 00-gerador && DATABRICKS_CONFIG_PROFILE="$PERFIL" uv run python scripts/conferir_catalogo.py "$ARTIGO" "$AMBIENTE" ${1:+--relogio "$1"})
 }
 
 limpar() {
-  echo "== Limpando: destroy do bundle e DROP CATALOG $CATALOGO"
-  databricks bundle destroy -p "$PERFIL" --var "sufixo_catalogo=$SUFIXO" --auto-approve || true
-  (cd 00-gerador && DATABRICKS_CONFIG_PROFILE="$PERFIL" uv run python -c \
-    "from databricks.connect import DatabricksSession as S; S.builder.serverless().getOrCreate().sql('DROP CATALOG IF EXISTS $CATALOGO CASCADE')") || true
+  echo "== Limpando: destroy do bundle e DROP CATALOG de $CATALOGOS"
+  databricks bundle destroy -p "$PERFIL" --var "ambiente=$AMBIENTE" --auto-approve || true
+  for catalogo in $CATALOGOS; do
+    (cd 00-gerador && DATABRICKS_CONFIG_PROFILE="$PERFIL" uv run python -c \
+      "from databricks.connect import DatabricksSession as S; S.builder.serverless().getOrCreate().sql('DROP CATALOG IF EXISTS $catalogo CASCADE')") || true
+  done
 }
 trap limpar EXIT
 
 echo "== validate e deploy"
-databricks bundle validate -p "$PERFIL" --var "sufixo_catalogo=$SUFIXO"
-databricks bundle deploy -p "$PERFIL" --var "sufixo_catalogo=$SUFIXO"
+databricks bundle validate -p "$PERFIL" --var "ambiente=$AMBIENTE"
+databricks bundle deploy -p "$PERFIL" --var "ambiente=$AMBIENTE"
 
 echo "== $JOB (escala $ESCALA)"
-time databricks bundle run "$JOB" -p "$PERFIL" --params "escala=$ESCALA,reset=false"
+time databricks bundle run "$JOB" -p "$PERFIL" --var "ambiente=$AMBIENTE" --params "escala=$ESCALA,reset=false"
 conferir "$CARGA"
 
 echo "== $JOB de novo, sem reset (nada deve mudar)"
-databricks bundle run "$JOB" -p "$PERFIL" --params "escala=$ESCALA,reset=false"
+databricks bundle run "$JOB" -p "$PERFIL" --var "ambiente=$AMBIENTE" --params "escala=$ESCALA,reset=false"
 conferir "$CARGA"
 
 echo "== avancar_tempo (1 dia: o relógio vai para $DIA_SEGUINTE e chegam lotes novos)"
-databricks bundle run avancar_tempo -p "$PERFIL" --params "artigo=$ARTIGO,dias=1"
+databricks bundle run avancar_tempo -p "$PERFIL" --var "ambiente=$AMBIENTE" --params "artigo=$ARTIGO,dias=1"
 conferir "$DIA_SEGUINTE"
 
 echo "== $JOB com reset (recria do zero; relógio de volta a $CARGA)"
-databricks bundle run "$JOB" -p "$PERFIL" --params "escala=$ESCALA,reset=true"
+databricks bundle run "$JOB" -p "$PERFIL" --var "ambiente=$AMBIENTE" --params "escala=$ESCALA,reset=true"
 conferir "$CARGA"

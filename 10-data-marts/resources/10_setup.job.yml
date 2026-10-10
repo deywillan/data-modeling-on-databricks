@@ -1,5 +1,7 @@
-# Job de setup do artigo 10 (Data Marts): cria o catálogo medalhao_10_data_marts, os schemas landing (com
-# Volume), bronze, silver, gold e gabarito, e grava a carga inicial da fatia na landing.
+# Job de setup do artigo 10 (Data Marts): cria os catálogos a10_bronze_<amb>, a10_silver_<amb> e
+# a10_gold_<amb> (o ambiente vem do target do bundle: dev → _dev, prod → _prd), com um schema por
+# sistema da fatia e o Volume landing no Bronze,
+# o schema gabarito no Silver e a carga inicial da fatia nas landings.
 #
 #   databricks bundle run 10_setup -p <seu-perfil>
 #   databricks bundle run 10_setup -p <seu-perfil> --params escala=0.1,reset=true
@@ -23,7 +25,7 @@ resources:
               - "--artigo=10-data-marts"
               - "--escala={{job.parameters.escala}}"
               - "--reset={{job.parameters.reset}}"
-              - "--sufixo-catalogo=${var.sufixo_catalogo}"
+              - "--ambiente=${var.ambiente}"
       # Sem cluster declarado: o job roda em compute serverless (o único do Free Edition).
       environments:
         - environment_key: gerador

@@ -1,5 +1,7 @@
-# Job de setup do artigo 06 (Business Vault): cria o catálogo medalhao_06_business_vault, os schemas landing (com
-# Volume), bronze, silver, gold e gabarito, e grava a carga inicial da fatia na landing.
+# Job de setup do artigo 06 (Business Vault): cria os catálogos a06_bronze_<amb>, a06_silver_<amb> e
+# a06_gold_<amb> (o ambiente vem do target do bundle: dev → _dev, prod → _prd), com um schema por
+# sistema da fatia e o Volume landing no Bronze,
+# o schema gabarito no Silver e a carga inicial da fatia nas landings.
 #
 #   databricks bundle run 06_setup -p <seu-perfil>
 #   databricks bundle run 06_setup -p <seu-perfil> --params escala=0.1,reset=true
@@ -23,7 +25,7 @@ resources:
               - "--artigo=06-business-vault"
               - "--escala={{job.parameters.escala}}"
               - "--reset={{job.parameters.reset}}"
-              - "--sufixo-catalogo=${var.sufixo_catalogo}"
+              - "--ambiente=${var.ambiente}"
       # Sem cluster declarado: o job roda em compute serverless (o único do Free Edition).
       environments:
         - environment_key: gerador

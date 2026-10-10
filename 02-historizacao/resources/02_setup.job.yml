@@ -1,5 +1,6 @@
-# Job de setup do artigo 02 (Historização): cria o catálogo medalhao_02_historizacao, os schemas
-# landing (com Volume), bronze, silver e gold, e grava a carga inicial da fatia na landing.
+# Job de setup do artigo 02 (Historização): cria os catálogos a02_bronze_<amb>, a02_silver_<amb> e
+# a02_gold_<amb> (o ambiente vem do target do bundle: dev → _dev, prod → _prd), com um schema por
+# sistema da fatia e o Volume landing no Bronze, e grava a carga inicial da fatia nas landings.
 #
 #   databricks bundle run 02_setup -p <seu-perfil>
 #   databricks bundle run 02_setup -p <seu-perfil> --params escala=0.1,reset=true
@@ -23,7 +24,7 @@ resources:
               - "--artigo=02-historizacao"
               - "--escala={{job.parameters.escala}}"
               - "--reset={{job.parameters.reset}}"
-              - "--sufixo-catalogo=${var.sufixo_catalogo}"
+              - "--ambiente=${var.ambiente}"
       # Sem cluster declarado: o job roda em compute serverless (o único do Free Edition).
       environments:
         - environment_key: gerador

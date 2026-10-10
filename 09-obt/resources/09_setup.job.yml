@@ -1,5 +1,6 @@
-# Job de setup do artigo 09 (OBT): cria o catálogo medalhao_09_obt, os schemas landing (com
-# Volume), bronze, silver e gold, e grava a carga inicial da fatia na landing.
+# Job de setup do artigo 09 (OBT): cria os catálogos a09_bronze_<amb>, a09_silver_<amb> e
+# a09_gold_<amb> (o ambiente vem do target do bundle: dev → _dev, prod → _prd), com um schema por
+# sistema da fatia e o Volume landing no Bronze, e grava a carga inicial da fatia nas landings.
 #
 #   databricks bundle run 09_setup -p <seu-perfil>
 #   databricks bundle run 09_setup -p <seu-perfil> --params escala=0.1,reset=true
@@ -23,7 +24,7 @@ resources:
               - "--artigo=09-obt"
               - "--escala={{job.parameters.escala}}"
               - "--reset={{job.parameters.reset}}"
-              - "--sufixo-catalogo=${var.sufixo_catalogo}"
+              - "--ambiente=${var.ambiente}"
       # Sem cluster declarado: o job roda em compute serverless (o único do Free Edition).
       environments:
         - environment_key: gerador
