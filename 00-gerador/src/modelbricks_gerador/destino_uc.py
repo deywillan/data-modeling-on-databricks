@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 CATALOGO_ALTERNATIVO = "medalhao"
 VOLUME_LANDING = "landing"
+# A pesquisa técnica inicial sugeriu cerca de 16 threads para o upload ao Volume. Mantemos 32
+# de propósito: na medição do ticket 17 (escala 1, Free Edition), 32 threads reduziram em cerca
+# de 20% o tempo de gravação da landing em relação a 16.
 _THREADS_UPLOAD = 32
 _NUMERO_ARTIGO = re.compile(r"^medalhao_(\d{2})_")
 
