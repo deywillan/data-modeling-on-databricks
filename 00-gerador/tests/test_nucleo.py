@@ -250,7 +250,7 @@ def test_atrasos_do_roteiro_aplicados_e_registrados_no_gabarito(gerado):
                 observados.add((entidade, str(linha[chave]), linha["_lote"], linha["_arquivo"]))
     registrados = set()
     for r in registros:
-        assert r["granularidade"] == "linha" and list(r["artigos"]) == roteiro.defeitos["evento_atrasado"].artigos
+        assert r["granularidade"] == "linha"
         registrados.add((r["entidade"], r["chave_sistema"], r["data_entrega"], r["arquivo"]))
     assert observados == registrados
     desvio = math.sqrt(TAXA_ATRASO * (1 - TAXA_ATRASO) / total)

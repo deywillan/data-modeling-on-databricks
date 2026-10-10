@@ -24,7 +24,6 @@ from .sistemas import PROJECOES, Contexto, Entrega
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
 
-SCHEMAS_MEDALHAO = ("landing", "bronze", "silver", "gold")
 TABELA_MAPA_CHAVES = "mapa_chaves"  # gabarito: chave verdadeira → chave em cada sistema
 TABELA_DEFEITOS = "defeitos"  # gabarito: cada defeito injetado nos dados da landing
 
@@ -52,8 +51,10 @@ def gerar_fatia(
 ) -> Resultado:
     """Prepara o ambiente do artigo e grava a carga inicial da fatia até `ate`.
 
-    Cria os schemas `landing` (com Volume), `bronze`, `silver`, `gold` e, se a fatia pedir,
-    `gabarito`; só a landing (e o gabarito) recebem dados. Se o relógio já existir, não
+    Cria os três catálogos do artigo (`aNN_bronze_<amb>`, `aNN_silver_<amb>`, `aNN_gold_<amb>`),
+    no Bronze um schema por sistema da fatia com o Volume `landing` e o schema `_controle`
+    (relógio) e, se a fatia pedir, o schema `gabarito` no Silver; só as landings, o relógio e o
+    gabarito recebem dados. O `destino` já sabe o artigo e o ambiente. Se o relógio já existir, não
     altera nada e informa a data atual (mas levanta `RelogioIncompativel` se ele foi gravado com
     outra versão do roteiro ou outra escala); com `reset=True`, recria o ambiente do zero.
     `ate` padrão: `datas.carga_inicial` do roteiro. `roteiro` aceita um caminho alternativo.
@@ -63,14 +64,14 @@ def gerar_fatia(
     """
     roteiro = _roteiro(roteiro)
     fatia = roteiro.fatia(artigo)
+    _conferir_destino(destino, artigo)
     if escala <= 0:
         raise ValueError(f"escala deve ser positiva (recebido {escala}).")
     ate = ate or roteiro.datas.carga_inicial
     if ate < roteiro.datas.inicio:
         raise ValueError(f"ate ({ate}) é anterior ao início da história ({roteiro.datas.inicio}).")
 
-    schemas = SCHEMAS_MEDALHAO + (("gabarito",) if fatia.gabarito else ())
-    destino.preparar(schemas, reset=reset)
+    destino.preparar(fatia.sistemas, gabarito=fatia.gabarito, reset=reset)
 
     relogio = ler_relogio(destino)
     if relogio is not None:
@@ -118,6 +119,7 @@ def avancar_tempo(
     sem duplicar."""
     roteiro = _roteiro(roteiro)
     fatia = roteiro.fatia(artigo)
+    _conferir_destino(destino, artigo)
     if dias < 1:
         raise ValueError(f"dias deve ser pelo menos 1 (recebido {dias}).")
     relogio = ler_relogio(destino)
@@ -206,6 +208,12 @@ def _gravar_defeitos(contexto: Contexto, entregas: list[Entrega], destino: Desti
     defeitos = reduce(lambda a, b: a.unionByName(b), partes).select(*COLUNAS_DEFEITOS)
     ordem = ("sistema", "entidade", "data_entrega", "tipo", "chave_sistema", "seq", "coluna", "arquivo")
     destino.gravar_gabarito(TABELA_DEFEITOS, defeitos.orderBy(*ordem), acrescentar=acrescentar)
+
+
+def _conferir_destino(destino: Destino, artigo: str) -> None:
+    """O destino aponta para os catálogos de um artigo; gravar neles dados de outro misturaria as fatias."""
+    if destino.artigo != artigo:
+        raise ValueError(f"O destino pertence ao artigo {destino.artigo}, não a {artigo}.")
 
 
 def _roteiro(roteiro: Roteiro | str | Path | None) -> Roteiro:

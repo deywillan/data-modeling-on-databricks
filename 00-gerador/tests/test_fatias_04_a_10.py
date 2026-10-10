@@ -20,25 +20,24 @@ import geracoes
 import pytest
 import yaml
 
-from modelbricks_gerador import carregar_roteiro
+from modelbricks_gerador import carregar_roteiro, catalogos_do_artigo
 
 RAIZ_REPOSITORIO = geracoes.RAIZ_GERADOR.parent
 
-# Registro artigo → (catálogo, sistemas, gabarito), conforme a spec.
+# Registro artigo → (sistemas, gabarito), conforme a spec. Os catálogos saem de `catalogos_do_artigo`.
 FATIAS = {
-    "04-ods": ("medalhao_04_ods", {"embarque", "passagemhub", "rotacerta"}, False),
-    "05-raw-vault": ("medalhao_05_raw_vault", {"embarque", "passagemhub", "solticket", "solfin"}, True),
-    "06-business-vault": ("medalhao_06_business_vault", {"embarque", "passagemhub", "solticket", "solfin"}, True),
-    "07-star-schema": ("medalhao_07_star_schema", {"embarque", "passagemhub"}, False),
-    "08-snowflake": ("medalhao_08_snowflake", {"patio", "ibge"}, False),
-    "09-obt": ("medalhao_09_obt", {"rotacerta", "rastro"}, False),
+    "04-ods": ({"embarque", "passagemhub", "rotacerta"}, False),
+    "05-raw-vault": ({"embarque", "passagemhub", "solticket", "solfin"}, True),
+    "06-business-vault": ({"embarque", "passagemhub", "solticket", "solfin"}, True),
+    "07-star-schema": ({"embarque", "passagemhub"}, False),
+    "08-snowflake": ({"patio", "ibge"}, False),
+    "09-obt": ({"rotacerta", "rastro"}, False),
     "10-data-marts": (
-        "medalhao_10_data_marts",
         {"nucleo", "rastro", "embarque", "passagemhub", "rotacerta", "patio", "apolice", "solticket", "solfin", "ibge"},
         True,
     ),
 }
-TODOS_OS_SISTEMAS = FATIAS["10-data-marts"][1]
+TODOS_OS_SISTEMAS = FATIAS["10-data-marts"][0]
 
 # Divisão (empresa) dona de cada sistema, como o gabarito a chama.
 DIVISAO = {
@@ -64,17 +63,16 @@ def test_job_de_setup_chama_o_gerador_para_o_proprio_artigo_e_roda_em_serverless
     assert tarefa["python_wheel_task"]["entry_point"] == "gerar_fatia"
     parametros = tarefa["python_wheel_task"]["parameters"]
     assert f"--artigo={artigo}" in parametros
-    assert "--sufixo-catalogo=${var.sufixo_catalogo}" in parametros
+    assert "--ambiente=${var.ambiente}" in parametros
     assert "job_cluster_key" not in tarefa and "new_cluster" not in job, "só compute serverless"
     assert {p["name"]: p["default"] for p in job["parameters"]} == {"escala": "1", "reset": "false"}
 
 
 @pytest.mark.parametrize("artigo", FATIAS)
-def test_cada_fatia_tem_o_proprio_catalogo_so_os_proprios_sistemas_e_gabarito_so_quando_declarado(artigo):
-    catalogo, sistemas, gabarito = FATIAS[artigo]
+def test_cada_fatia_tem_so_os_proprios_sistemas_e_gabarito_so_quando_declarado(artigo):
+    sistemas, gabarito = FATIAS[artigo]
     fatia = carregar_roteiro().fatia(artigo)
 
-    assert fatia.catalogo == catalogo
     assert set(fatia.sistemas) == sistemas
     assert fatia.gabarito == gabarito
 
@@ -83,26 +81,30 @@ def test_a_fatia_10_e_a_uniao_de_todas_as_outras_e_nenhum_catalogo_se_repete():
     fatias = carregar_roteiro().fatias
 
     assert set(fatias["10-data-marts"].sistemas) == {s for f in fatias.values() for s in f.sistemas}
-    catalogos = [f.catalogo for f in fatias.values()]
-    assert len(set(catalogos)) == len(catalogos), "um catálogo por artigo"
+    catalogos = [c for artigo in fatias for c in catalogos_do_artigo(artigo, "dev").values()]
+    assert len(set(catalogos)) == len(catalogos) == 3 * len(fatias), "três catálogos por artigo, sem repetição"
 
 
 @pytest.mark.parametrize("artigo", FATIAS)
-def test_readme_do_artigo_explica_o_setup_o_catalogo_os_sistemas_e_o_gabarito(artigo):
-    catalogo, sistemas, gabarito = FATIAS[artigo]
+def test_readme_do_artigo_explica_o_setup_os_catalogos_os_sistemas_e_o_gabarito(artigo):
+    sistemas, gabarito = FATIAS[artigo]
     numero = artigo.split("-")[0]
+    catalogos = catalogos_do_artigo(artigo, "dev")
     texto = (RAIZ_REPOSITORIO / artigo / "README.md").read_text(encoding="utf-8")
 
     assert f"databricks bundle run {numero}_setup" in texto
     assert f"avancar_tempo -p <seu-perfil> --params artigo={artigo},dias=1" in texto
-    assert f"DROP CATALOG {catalogo} CASCADE" in texto
-    assert f"a{numero}_landing" in texto, "a alternativa de catálogo único está documentada"
+    for catalogo in catalogos.values():
+        assert f"DROP CATALOG {catalogo} CASCADE" in texto
+    assert "`_prd`" in texto and "--var ambiente=" not in texto, "o sufixo do ambiente vem do target do bundle"
+    assert "_controle" in texto
     for sistema in sistemas:
-        assert f"| `{sistema}/` |" in texto, f"{sistema} sem linha na tabela de sistemas"
-    outros = {f"| `{s}/` |" for s in TODOS_OS_SISTEMAS - sistemas}
+        assert f"| `{sistema}` |" in texto, f"{sistema} sem linha na tabela de sistemas"
+    outros = {f"| `{s}` |" for s in TODOS_OS_SISTEMAS - sistemas}
     assert not [o for o in outros if o in texto], "o README lista só os sistemas do próprio artigo"
-    assert (f"`{catalogo}.gabarito`" in texto) == gabarito
+    assert (f"`{catalogos['silver']}.gabarito`" in texto) == gabarito
     assert ("Este artigo não usa o schema `gabarito`." in texto) == (not gabarito)
+    assert ("saem sem defeitos" in texto) == (not gabarito), "só os artigos sem gabarito têm arquivos limpos"
     # Repositório público: nada de perfil, host ou credencial do autor.
     assert not re.search(r"databricks-free-edition|dbw-|adb-\d|dapi[0-9a-f]{8}|https://[\w.-]+\.cloud\.databricks\.com", texto)
 
@@ -111,7 +113,7 @@ def test_readme_do_artigo_explica_o_setup_o_catalogo_os_sistemas_e_o_gabarito(ar
 
 
 def _raizes_da_landing(destino) -> set[str]:
-    return {p.name for p in destino.volume.iterdir()}
+    return {p.name for p in destino.pasta("bronze").iterdir()}
 
 
 def _tabelas_do_gabarito(destino) -> dict[str, list[dict]]:
@@ -121,13 +123,13 @@ def _tabelas_do_gabarito(destino) -> dict[str, list[dict]]:
 @pytest.mark.lento
 def test_05_grava_so_os_sistemas_da_fatia_e_o_gabarito_fica_fora_da_landing(fatia_05):
     destino = fatia_05.final
-    sistemas = FATIAS["05-raw-vault"][1]
+    sistemas = FATIAS["05-raw-vault"][0]
 
     assert fatia_05.resultados[0].gerou
     assert _raizes_da_landing(destino) == sistemas | {"_controle"}
     for sistema in sistemas:
         assert geracoes.arquivos(destino, sistema), f"{sistema} sem arquivos na landing"
-    assert not any("gabarito" in p.as_posix() for p in destino.volume.rglob("*"))
+    assert not any("gabarito" in c for c in destino.listar(""))
     tabelas = _tabelas_do_gabarito(destino)
     assert {"mapa_chaves", "defeitos", "pessoas"} <= set(tabelas)
     # O gabarito só descreve o que foi entregue: os outros sistemas não aparecem.
@@ -143,7 +145,7 @@ def test_10_grava_todos_os_sistemas_e_o_gabarito_cobre_todos_os_que_tem_chaves(f
     assert _raizes_da_landing(destino) == TODOS_OS_SISTEMAS | {"_controle"}
     for sistema in TODOS_OS_SISTEMAS:
         assert geracoes.arquivos(destino, sistema), f"{sistema} sem arquivos na landing"
-    assert not any("gabarito" in p.as_posix() for p in destino.volume.rglob("*"))
+    assert not any("gabarito" in c for c in destino.listar(""))
     tabelas = _tabelas_do_gabarito(destino)
     assert {r["sistema"] for r in tabelas["mapa_chaves"]} <= TODOS_OS_SISTEMAS
     # O SolFin e o IBGE não têm chave de entidade do mundo verdadeiro no mapa; os demais têm.
@@ -152,7 +154,7 @@ def test_10_grava_todos_os_sistemas_e_o_gabarito_cobre_todos_os_que_tem_chaves(f
 
 @pytest.mark.lento
 def test_o_mesmo_cliente_tem_os_mesmos_dados_nos_artigos_05_e_10(fatia_05, fatia_10):
-    for sistema in FATIAS["05-raw-vault"][1]:
+    for sistema in FATIAS["05-raw-vault"][0]:
         assert geracoes.arquivos(fatia_05.final, sistema) == geracoes.arquivos(fatia_10.final, sistema), (
             f"{sistema} difere entre o 05 e o 10"
         )
@@ -204,7 +206,7 @@ def test_veiculos_da_frota_reaparecem_na_telemetria_e_no_erp_como_ativo(fatia_10
 @pytest.mark.lento
 def test_geografia_toda_localizacao_das_divisoes_existe_nos_municipios_do_ibge(fatia_10):
     destino = fatia_10.final
-    pasta = destino.volume / "ibge" / "municipios" / geracoes.CARGA_INICIAL.isoformat()
+    pasta = destino.pasta_sistema("ibge") / "municipios" / geracoes.CARGA_INICIAL.isoformat()
     codigos = {
         int(linha["cod_municipio"])
         for arquivo in pasta.glob("*.csv")

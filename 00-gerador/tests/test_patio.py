@@ -234,7 +234,6 @@ def test_defeitos_do_patio_aparecem_na_taxa_do_roteiro_e_estao_registrados(gerad
     fotos = _fotos(arquivos)
     codigos = {m["cod_municipio"] for m in gabarito["municipios"]}
     taxas = {tipo: d.taxas.get("patio") for tipo, d in carregar_roteiro(roteiro).defeitos.items()}
-    artigos = {tipo: d.artigos for tipo, d in carregar_roteiro(roteiro).defeitos.items()}
 
     observados = defaultdict(set)
     for foto in fotos.values():
@@ -247,7 +246,6 @@ def test_defeitos_do_patio_aparecem_na_taxa_do_roteiro_e_estao_registrados(gerad
     registrados = defaultdict(set)
     for r in gabarito["defeitos"]:
         assert (r["sistema"], r["entidade"], r["granularidade"]) == ("patio", "clientes", "linha")
-        assert list(r["artigos"]) == artigos[r["tipo"]]
         assert r["data_entrega"] in fotos
         registrados[r["tipo"]].add((r["chave_sistema"], r["coluna"], r["valor_sujo"]))
     assert set(registrados) == {t for t, taxa in taxas.items() if taxa is not None}

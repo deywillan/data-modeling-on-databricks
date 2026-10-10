@@ -18,6 +18,7 @@ from pathlib import Path
 
 import geracoes
 import pytest
+from geracoes import conteudo as _conteudo
 
 from modelbricks_gerador import DestinoLocal, carregar_roteiro, gerar_fatia
 
@@ -35,10 +36,6 @@ def _arquivos(pasta: Path) -> list[Path]:
     return sorted(p for p in pasta.rglob("*") if p.is_file())
 
 
-def _conteudo(pasta: Path) -> dict[str, bytes]:
-    return {p.relative_to(pasta).as_posix(): p.read_bytes() for p in _arquivos(pasta)}
-
-
 def _sem_relogio(conteudo: dict[str, bytes]) -> dict[str, bytes]:
     return {c: v for c, v in conteudo.items() if not c.startswith("_controle/")}
 
@@ -50,16 +47,16 @@ def fatia(fatia_01, spark, tmp_path_factory):
     intruso, recriada com `reset=True`, o que também compara duas gerações independentes."""
     pasta = tmp_path_factory.mktemp("fatia01")
     carga_inicial = fatia_01.etapas[0]
-    carga = _conteudo(carga_inicial.raiz)
+    carga = _conteudo(carga_inicial)
 
-    sem_reset = DestinoLocal(pasta / "sem_reset" / "medalhao_01_bronze")
+    sem_reset = DestinoLocal(pasta / "sem_reset", ARTIGO, geracoes.AMBIENTE)
     shutil.copytree(carga_inicial.raiz, sem_reset.raiz)
     segunda = gerar_fatia(ARTIGO, sem_reset, escala=ESCALA, roteiro=fatia_01.roteiro)
-    depois_da_segunda = _conteudo(sem_reset.raiz)
+    depois_da_segunda = _conteudo(sem_reset)
 
-    b = DestinoLocal(pasta / "b" / "medalhao_01_bronze")
+    b = DestinoLocal(pasta / "b", ARTIGO, geracoes.AMBIENTE)
     shutil.copytree(carga_inicial.raiz, b.raiz)
-    intruso = b.raiz / "bronze" / "sobra_de_execucao_anterior.txt"
+    intruso = b.pasta("silver") / "sobra_de_execucao_anterior.txt"
     intruso.write_text("lixo", encoding="utf-8")
     # O reset recria o ambiente do zero; para poupar a cota, recria só o IBGE (fatia reduzida),
     # que é a parte da carga que se pode comparar byte a byte com a da geração compartilhada.
@@ -73,24 +70,26 @@ def fatia(fatia_01, spark, tmp_path_factory):
 
 def test_so_os_sistemas_da_fatia_chegam_a_landing_e_nao_ha_gabarito(fatia):
     assert set(carregar_roteiro().fatia(ARTIGO).sistemas) == SISTEMAS
-    landing = _conteudo(fatia["a"].volume)
+    landing = _conteudo(fatia["a"])
 
     assert {c.split("/")[0] for c in landing} == SISTEMAS | {"_controle"}
-    assert not (fatia["a"].raiz / "gabarito").exists()
+    assert not fatia["a"].pasta_gabarito().exists()
     assert not any("gabarito" in c for c in landing)
 
 
 def test_fronteira_do_primeiro_destino_depois_da_carga_e_do_avanco(fatia):
-    raiz = fatia["a"].raiz
-    for schema in ("landing", "bronze", "silver", "gold"):
-        assert (raiz / schema).is_dir(), f"schema {schema} não foi criado"
-    for schema in ("bronze", "silver", "gold"):
-        assert _arquivos(raiz / schema) == [], f"o gerador escreveu em {schema}"
-    assert all(c.startswith("landing/") for c in fatia["carga"])
+    destino = fatia["a"]
+    assert {p.name for p in destino.raiz.iterdir()} == set(destino.catalogos.values())
+    assert {p.name for p in destino.pasta("bronze").iterdir()} == SISTEMAS | {"_controle"}
+    for sistema in SISTEMAS:
+        assert destino.pasta_sistema(sistema).is_dir(), f"o Volume landing de {sistema} não foi criado"
+    for camada in ("silver", "gold"):
+        assert _arquivos(destino.pasta(camada)) == [], f"o gerador escreveu no catálogo {camada}"
+    assert {c.split("/")[0] for c in fatia["carga"]} == SISTEMAS | {"_controle"}
 
 
 def test_cada_sistema_entrega_no_seu_formato(fatia):
-    landing = _sem_relogio(_conteudo(fatia["a"].volume))
+    landing = _sem_relogio(_conteudo(fatia["a"]))
     por_sistema: dict[str, list[tuple[str, bytes]]] = {s: [] for s in SISTEMAS}
     for caminho, conteudo in landing.items():
         sistema, entidade, data_lote, nome = caminho.split("/")
@@ -117,7 +116,7 @@ def test_cada_sistema_entrega_no_seu_formato(fatia):
 
 
 def test_grava_municipios_do_ibge_na_landing_pela_data_simulada(fatia):
-    pasta = fatia["a"].volume / "ibge" / "municipios" / CARGA_INICIAL.isoformat()
+    pasta = fatia["a"].pasta_sistema("ibge") / "municipios" / CARGA_INICIAL.isoformat()
     csvs = list(pasta.glob("*.csv"))
     assert len(csvs) == 1
     linhas = csvs[0].read_text(encoding="utf-8").splitlines()
@@ -142,11 +141,11 @@ def test_segunda_chamada_sem_reset_nao_altera_nada_e_informa_o_relogio(fatia):
 
 def test_avancar_um_dia_so_cria_lotes_do_dia_novo_dos_sistemas_da_fatia(fatia):
     avanco, carga = fatia["avanco"], fatia["carga"]
-    depois = _conteudo(fatia["a"].raiz)
+    depois = _conteudo(fatia["a"])
 
     assert avanco.data_relogio == date(2026, 1, 1)
     assert {c: depois[c] for c in carga} == carga, "nenhum arquivo já entregue muda"
-    novos = [c.removeprefix("landing/landing/") for c in depois if c not in carga]
+    novos = [c for c in depois if c not in carga]
     novos_de_sistema = [c for c in novos if not c.startswith("_controle/")]
     assert {c.split("/")[2] for c in novos_de_sistema} == {DIA_NOVO}
     assert {"patio", "rastro"} <= {c.split("/")[0] for c in novos_de_sistema} <= SISTEMAS - {"ibge"}
@@ -156,6 +155,6 @@ def test_avancar_um_dia_so_cria_lotes_do_dia_novo_dos_sistemas_da_fatia(fatia):
 def test_reset_recria_o_ambiente_do_zero_com_o_mesmo_conteudo(fatia):
     assert fatia["recriada"].gerou
     assert not fatia["intruso"].exists()
-    ibge_e_relogio = {c: v for c, v in fatia["carga"].items() if c.startswith(("landing/landing/ibge/", "landing/landing/_controle/"))}
+    ibge_e_relogio = {c: v for c, v in fatia["carga"].items() if c.startswith(("ibge/", "_controle/"))}
     assert ibge_e_relogio
-    assert _conteudo(fatia["b"].raiz) == ibge_e_relogio, "o ambiente recriado grava os mesmos bytes"
+    assert _conteudo(fatia["b"]) == ibge_e_relogio, "o ambiente recriado grava os mesmos bytes"

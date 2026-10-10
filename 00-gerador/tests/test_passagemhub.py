@@ -219,7 +219,6 @@ def test_defeitos_do_roteiro_aplicados_por_pedido_e_registrados_no_gabarito(gera
     for r in gabarito["defeitos"]:
         assert r["sistema"] == "passagemhub" and r["granularidade"] == "linha"
         assert r["tabela_verdadeira"] == "pessoas" and r["entidade"] == "eventos_venda"
-        assert list(r["artigos"]) == roteiro.defeitos[r["tipo"]].artigos
         if r["tipo"] == "nome_abreviado_ou_com_erro":
             assert r["valor_original"] == pessoas[r["id_verdadeiro"]]["nome"].upper() != r["valor_sujo"]
         registrados[r["tipo"]].add((r["chave_sistema"], r["coluna"], r["data_entrega"], r["arquivo"]))
