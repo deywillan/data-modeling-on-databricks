@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 9
+versao: 10
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -25,7 +25,7 @@ volumes:
   veiculos: 3000
   veiculos_frota_propria: 400
   passagens_embarque_passagemhub: 600000
-  passagens_solticket: 150000
+  passagens_solticket: 150000               # carga histórica do SolTicket: do início da história à véspera da aquisição
   fretes_rotacerta: 60000
   vendas_veiculos: 3000
   apolices: 8000
@@ -163,6 +163,32 @@ parametros:
     seguro_na_venda: 0.60                        # vendas de veículo a segurados que levam o seguro
     taxa_premio_veiculo: {minimo: 0.02, maximo: 0.05}
     cancelamento: 0.08                           # apólice cancelada durante a vigência
+  # Legados do Expresso Vale do Sol (SolTicket e SolFin): nada antes da aquisição; nela, a
+  # carga histórica inteira chega de uma vez (uma foto completa); depois, uma foto por semana.
+  # Os volumes dos legados contam a carga histórica (do início da história à véspera da
+  # aquisição) e seguem no mesmo ritmo depois dela.
+  legados:
+    snapshots:
+      desde: 2025-07-01                          # data da aquisição (eventos.aquisicao_expresso_vale_do_sol)
+      periodos:
+        - {ate: 2025-07-01, frequencia: diaria}  # a carga histórica, no dia da aquisição
+        - {frequencia: semanal, dia_semana: 0}   # depois, toda segunda-feira
+  # Bilhetagem legada do Expresso Vale do Sol (SolTicket).
+  solticket:
+    canais: {guiche: 0.75, telefone: 0.25}       # pesos relativos
+    horario_vendas: {minimo: 6, maximo: 22}
+    antecedencia_compra_dias: {minimo: 0, maximo: 20}
+    poltronas: 42
+    cancelamento: 0.05                           # passagem cancelada antes da viagem
+  # ERP legado do Expresso Vale do Sol (SolFin): fornecedores e títulos a pagar.
+  solfin:
+    fornecedores: 0.03                           # fração das empresas PJ que fornecem ao Vale do Sol
+    titulos_pagar: 5000                          # títulos na carga histórica, na escala 1
+    horario_expediente: {minimo: 8, maximo: 18}
+    categorias_despesa: {Combustível: 0.40, Manutenção: 0.20, Peças: 0.15, Pedágio: 0.10, Serviços: 0.10, Aluguel: 0.05}
+    valor_titulo: {minimo: 200, maximo: 40000}   # R$
+    prazo_vencimento_dias: {minimo: 10, maximo: 45}
+    dias_pagamento_apos_vencimento: {minimo: 0, maximo: 10}
 
 # Mundo verdadeiro: como as entidades mestres e a participação de cada uma nas empresas
 # do grupo são geradas. Pesos são relativos (não precisam somar 1).

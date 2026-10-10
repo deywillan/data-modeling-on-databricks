@@ -2,8 +2,10 @@
 
 Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e as
 tabelas do schema `gabarito`. Para medir as taxas dos defeitos com folga estatística, o
-módulo usa uma cópia do roteiro com uma fatia só do *Pátio* (com gabarito) e a taxa de
-município fora do padrão mais alta que a do Estudo de Caso.
+módulo usa a geração `patio` (ver `geracoes.py`): uma fatia só do *Pátio* (com gabarito)
+na escala 0,2, até 03/01/2026, com a taxa de município fora do padrão mais alta que a do
+Estudo de Caso. O teste lento compara com a `patio_em_partes`, cujo `avancar_tempo`
+atravessa o fim do período de fotos diárias fechado em 31/12/2025.
 """
 
 import csv
@@ -12,19 +14,14 @@ import math
 import re
 from collections import defaultdict
 from datetime import date, timedelta
-from importlib import resources
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
-import yaml
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.2
-ARTIGO = "99-patio"
 CARGA_INICIAL = date(2025, 12, 31)
-DIAS_AVANCADOS = 3
-TAXA_MUNICIPIO = 0.10
+ULTIMO_DIA = date(2026, 1, 3)
 ENTIDADES = {
     "lojas": "id_loja",
     "clientes": "id_cliente",
@@ -34,20 +31,8 @@ ENTIDADES = {
 }
 
 
-def _roteiro_de_teste(pasta):
-    dados = yaml.safe_load(
-        resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
-    )
-    dados["defeitos"]["municipio_fora_do_padrao"]["taxas"]["patio"] = TAXA_MUNICIPIO
-    dados["fatias"][ARTIGO] = {"catalogo": "medalhao_99_patio", "sistemas": ["patio"], "gabarito": True}
-    caminho = pasta / "roteiro.yaml"
-    caminho.write_text(yaml.safe_dump(dados, allow_unicode=True), encoding="utf-8")
-    return caminho
-
-
 def _arquivos(destino: DestinoLocal) -> dict[str, bytes]:
-    pasta = destino.volume / "patio"
-    return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
+    return geracoes.arquivos(destino, "patio")
 
 
 def _fotos(arquivos: dict[str, bytes]) -> dict[date, dict[str, dict[str, dict]]]:
@@ -64,8 +49,7 @@ def _fotos(arquivos: dict[str, bytes]) -> dict[date, dict[str, dict[str, dict]]]
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    return geracoes.gabarito(destino)
 
 
 def _mapa(gabarito, entidade: str, tabela: str) -> dict[int, str]:
@@ -77,15 +61,11 @@ def _mapa(gabarito, entidade: str, tabela: str) -> dict[int, str]:
 
 
 @pytest.fixture(scope="module")
-def gerado(spark, tmp_path_factory):
-    """Carga inicial da fatia só do Pátio e avanço de alguns dias."""
-    pasta = tmp_path_factory.mktemp("patio")
-    roteiro = _roteiro_de_teste(pasta)
-    destino = DestinoLocal(pasta / "medalhao_99_patio")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark, roteiro=roteiro)
-    carga = _arquivos(destino)
-    avancar_tempo(ARTIGO, destino, DIAS_AVANCADOS, spark=spark, roteiro=roteiro)
-    return destino, roteiro, carga, _arquivos(destino), _gabarito(destino)
+def gerado(patio):
+    """Fatia só do Pátio até 03/01/2026 (geração `patio`)."""
+    assert patio.resultados[-1].data_relogio == ULTIMO_DIA
+    destino = patio.final
+    return destino, patio.roteiro, _arquivos(destino), _gabarito(destino)
 
 
 def _datas_esperadas(fim: date) -> list[date]:
@@ -100,9 +80,9 @@ def _datas_esperadas(fim: date) -> list[date]:
 
 
 def test_uma_pasta_por_data_de_foto_com_um_csv_por_entidade_na_frequencia_decidida(gerado):
-    _, _, carga, arquivos, _ = gerado
+    _, _, arquivos, _ = gerado
     padrao = re.compile(r"patio/([a-z_]+)/(\d{4}-\d{2}-\d{2})/\1_(\d{8})_0001\.csv")
-    fim = CARGA_INICIAL + timedelta(days=DIAS_AVANCADOS)
+    fim = ULTIMO_DIA
 
     datas = defaultdict(set)
     for caminho in arquivos:
@@ -113,8 +93,6 @@ def test_uma_pasta_por_data_de_foto_com_um_csv_por_entidade_na_frequencia_decidi
         datas[casamento[1]].add(date.fromisoformat(casamento[2]))
     for entidade in ENTIDADES:
         assert sorted(datas[entidade]) == _datas_esperadas(fim), entidade
-    assert {date.fromisoformat(c.split("/")[2]) for c in carga} == set(_datas_esperadas(CARGA_INICIAL))
-    assert {c: v for c, v in arquivos.items() if c in carga} == carga, "o avanço não muda a carga inicial"
 
     for caminho, conteudo in arquivos.items():
         entidade = caminho.split("/")[1]
@@ -123,7 +101,7 @@ def test_uma_pasta_por_data_de_foto_com_um_csv_por_entidade_na_frequencia_decidi
 
 
 def test_cada_foto_e_completa_com_todas_as_vendas_e_clientes_vigentes(gerado):
-    _, _, _, arquivos, gabarito = gerado
+    _, _, arquivos, gabarito = gerado
     fotos = _fotos(arquivos)
     venda_por_id = {v["id_venda"]: v for v in gabarito["vendas_veiculos"]}
     id_venda = _mapa(gabarito, "vendas", "vendas_veiculos")
@@ -160,7 +138,7 @@ def test_cada_foto_e_completa_com_todas_as_vendas_e_clientes_vigentes(gerado):
 
 
 def test_veiculos_da_frota_propria_estao_no_dms_vendidos_as_empresas_do_grupo(gerado):
-    _, roteiro, _, arquivos, gabarito = gerado
+    _, roteiro, arquivos, gabarito = gerado
     ultima = _fotos(arquivos)[max(_fotos(arquivos))]
     nomes_grupo = carregar_roteiro(roteiro).parametros.patio.clientes_grupo
     id_veiculo = _mapa(gabarito, "veiculos", "veiculos")
@@ -189,7 +167,7 @@ DATA_DE_CRIACAO = {"clientes": "data_cadastro", "vendas": "data_venda", "ordens_
 
 
 def test_diferencas_entre_fotos_consecutivas_sao_as_mudancas_geradas(gerado):
-    _, _, _, arquivos, _ = gerado
+    _, _, arquivos, _ = gerado
     fotos = _fotos(arquivos)
     datas = list(fotos)
     mudancas = defaultdict(set)
@@ -223,18 +201,23 @@ def test_diferencas_entre_fotos_consecutivas_sao_as_mudancas_geradas(gerado):
         assert mudancas[esperado], f"nenhuma mudança {esperado} entre as fotos"
     depois_da_carga = [d for d in datas if d > CARGA_INICIAL]
     assert any(fotos[d]["ordens_servico"] != fotos[d - timedelta(days=1)]["ordens_servico"] for d in depois_da_carga), (
-        "o avancar_tempo traz mudanças da oficina"
+        "as fotos do período sem fim (o do avancar_tempo) trazem mudanças da oficina"
     )
 
 
-def test_gerar_um_dia_isoladamente_produz_as_mesmas_fotos(spark, tmp_path, gerado):
-    _, roteiro, _, completo, _ = gerado
-    destino = DestinoLocal(tmp_path / "medalhao_99_patio")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, ate=date(2025, 12, 15), spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 1, spark=spark, roteiro=roteiro)
-    isolado = _arquivos(destino)
+@pytest.mark.lento
+def test_gerar_em_partes_produz_as_mesmas_fotos_tambem_no_avancar_tempo(gerado, patio_em_partes):
+    """Carga até 30/12/2025 e avanço de 4 dias: o avanço entrega a última foto do período
+    diário fechado e as do período sem fim, as mesmas da geração de uma vez."""
+    _, _, completo, _ = gerado
+    carga, depois = (_arquivos(etapa) for etapa in patio_em_partes.etapas)
+    assert patio_em_partes.resultados[-1].data_relogio == ULTIMO_DIA
 
-    assert isolado == {c: v for c, v in completo.items() if c.split("/")[2] <= "2025-12-16"}
+    assert {date.fromisoformat(c.split("/")[2]) for c in carga} == set(_datas_esperadas(date(2025, 12, 30)))
+    assert {c: v for c, v in depois.items() if c in carga} == carga, "o avanço não muda a carga inicial"
+    novas = {c.split("/")[2] for c in depois if c not in carga}
+    assert novas == {"2025-12-31", "2026-01-01", "2026-01-02", "2026-01-03"}
+    assert depois == completo
 
 
 def _municipio_valido(valor: str, codigos: set[int]) -> bool:
@@ -247,7 +230,7 @@ def _dentro_da_tolerancia(observados: int, populacao: int, taxa: float) -> bool:
 
 
 def test_defeitos_do_patio_aparecem_na_taxa_do_roteiro_e_estao_registrados(gerado):
-    _, roteiro, _, arquivos, gabarito = gerado
+    _, roteiro, arquivos, gabarito = gerado
     fotos = _fotos(arquivos)
     codigos = {m["cod_municipio"] for m in gabarito["municipios"]}
     taxas = {tipo: d.taxas.get("patio") for tipo, d in carregar_roteiro(roteiro).defeitos.items()}

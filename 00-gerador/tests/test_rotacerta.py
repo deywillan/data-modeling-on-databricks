@@ -3,8 +3,9 @@
 Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e, nas
 fatias com gabarito, as tabelas do schema `gabarito`.
 
-Para poupar a cota, o módulo usa uma cópia do roteiro em que a fatia 03-3fn (com gabarito)
-tem só o *RotaCerta*. As taxas de defeito são as do roteiro oficial (evento atrasado).
+Para poupar a cota, o módulo usa a geração `principal` (ver `geracoes.py`), compartilhada
+com os outros sistemas. As taxas de defeito do *RotaCerta* são as do roteiro oficial
+(evento atrasado).
 """
 
 import json
@@ -12,35 +13,20 @@ import math
 import re
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
-from importlib import resources
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
-import yaml
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.05
-ARTIGO = "03-3fn"
 CARGA_INICIAL = date(2025, 12, 31)
-ULTIMO_DIA = date(2026, 1, 10)
+ULTIMO_DIA = date(2026, 1, 12)
 ENTIDADES = {"clientes": "id_cliente", "caminhoes": "id_caminhao", "fretes": "id_frete"}
 PADRAO = re.compile(r"rotacerta/(clientes|caminhoes|fretes)/(\d{4}-\d{2}-\d{2})/\1_(\d{8})_0001\.json")
 
 
-def _roteiro_de_teste(pasta):
-    dados = yaml.safe_load(
-        resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
-    )
-    dados["fatias"][ARTIGO]["sistemas"] = ["rotacerta"]
-    caminho = pasta / "roteiro.yaml"
-    caminho.write_text(yaml.safe_dump(dados, allow_unicode=True), encoding="utf-8")
-    return caminho
-
-
 def _arquivos(destino: DestinoLocal) -> dict[str, bytes]:
-    pasta = destino.volume / "rotacerta"
-    return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
+    return geracoes.arquivos(destino, "rotacerta")
 
 
 def _operacoes(arquivos: dict[str, bytes]) -> list[dict]:
@@ -54,8 +40,7 @@ def _operacoes(arquivos: dict[str, bytes]) -> list[dict]:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    return geracoes.gabarito(destino, "rotacerta")
 
 
 def _mapa(gabarito, coluna: str) -> dict[int, int]:
@@ -75,19 +60,12 @@ def _instante(op: dict) -> datetime:
 
 
 @pytest.fixture(scope="module")
-def roteiro(tmp_path_factory):
-    return _roteiro_de_teste(tmp_path_factory.mktemp("roteiro_rotacerta"))
-
-
-@pytest.fixture(scope="module")
-def gerado(spark, tmp_path_factory, roteiro):
-    """Carga inicial e avanço de 10 dias."""
-    destino = DestinoLocal(tmp_path_factory.mktemp("rotacerta") / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark, roteiro=roteiro)
-    carga = _arquivos(destino)
-    avancar_tempo(ARTIGO, destino, (ULTIMO_DIA - CARGA_INICIAL).days, spark=spark, roteiro=roteiro)
+def gerado(principal):
+    """Carga inicial e avanço de 12 dias (geração `principal`)."""
+    assert principal.resultados[-1].data_relogio == ULTIMO_DIA
+    destino = principal.final
     arquivos = _arquivos(destino)
-    return destino, carga, arquivos, _operacoes(arquivos), _gabarito(destino)
+    return destino, _arquivos(principal.etapas[0]), arquivos, _operacoes(arquivos), _gabarito(destino)
 
 
 def test_lotes_cdc_chegam_um_arquivo_json_por_entidade_e_dia_simulado(gerado):
@@ -243,11 +221,8 @@ def test_atrasos_do_roteiro_aplicados_e_registrados_no_gabarito(gerado):
     assert max(r["data_entrega"] for r in registros) > CARGA_INICIAL
 
 
-def test_gerar_em_partes_produz_os_mesmos_arquivos(spark, tmp_path, roteiro, gerado):
+@pytest.mark.lento
+def test_gerar_em_partes_produz_os_mesmos_arquivos(gerado, principal_em_partes):
     _, _, completo, _, _ = gerado
-    destino = DestinoLocal(tmp_path / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, ate=date(2026, 1, 4), spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 2, spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 4, spark=spark, roteiro=roteiro)
 
-    assert _arquivos(destino) == completo
+    assert _arquivos(principal_em_partes.final) == completo

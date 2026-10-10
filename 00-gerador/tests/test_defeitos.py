@@ -1,47 +1,24 @@
 """Catálogo de defeitos observado pelo que `gerar_fatia`/`avancar_tempo` gravam.
 
 O roteiro oficial só dá ao *Embarque* a taxa de CDC duplicado (como no Estudo de Caso).
-Para exercitar os demais defeitos de linha pela mesma projeção, este módulo usa uma cópia
-do roteiro com taxas do *Embarque* para todos eles; a taxa observada na landing é
-comparada com a da cópia, e cada defeito observado com o `gabarito.defeitos`.
+Para exercitar os demais defeitos de linha pela mesma projeção, este módulo usa a geração
+`legados` (ver `geracoes.py`), feita com a variante do roteiro de teste que dá ao *Embarque*
+taxas para todos eles; a taxa observada na landing é comparada com a da variante, e cada
+defeito observado com o `gabarito.defeitos`.
 """
 
 import json
 import math
 from collections import Counter, defaultdict
 from datetime import date, datetime
-from importlib import resources
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
-import yaml
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.05
-DIAS_AVANCADOS = 5
-ARTIGO = "03-3fn"
 CHAVES = {"clientes": "id_cliente", "tarifas": "id_tarifa", "passagens": "id_passagem"}
-TAXAS_DE_TESTE = {
-    "cpf_fora_do_padrao": 0.10,
-    "nome_abreviado_ou_com_erro": 0.10,
-    "pessoa_duplicada_no_sistema": 0.05,
-    "contato_nulo": 0.15,
-    "evento_atrasado": 0.02,
-    "cdc_duplicado": 0.01,
-    "fk_orfa": 0.02,
-}
-
-
-def _roteiro_de_teste(pasta):
-    dados = yaml.safe_load(
-        resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
-    )
-    for tipo, taxa in TAXAS_DE_TESTE.items():
-        dados["defeitos"][tipo]["taxas"]["embarque"] = taxa
-    caminho = pasta / "roteiro.yaml"
-    caminho.write_text(yaml.safe_dump(dados, allow_unicode=True), encoding="utf-8")
-    return caminho
+TAXAS_DE_TESTE = geracoes.TAXAS_EMBARQUE
 
 
 def _operacoes(destino: DestinoLocal) -> list[dict]:
@@ -57,21 +34,15 @@ def _operacoes(destino: DestinoLocal) -> list[dict]:
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
     """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do Embarque (a fatia
     tem outros sistemas)."""
-    pasta = destino.raiz / "gabarito"
-    tabelas = {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
-    for nome in ("mapa_chaves", "defeitos"):
-        tabelas[nome] = [r for r in tabelas[nome] if r["sistema"] == "embarque"]
-    return tabelas
+    return geracoes.gabarito(destino, "embarque")
 
 
 @pytest.fixture(scope="module")
-def gerado(spark, tmp_path_factory):
-    """Carga inicial do 03-3fn com o roteiro de teste e avanço de alguns dias."""
-    pasta = tmp_path_factory.mktemp("defeitos")
-    roteiro = _roteiro_de_teste(pasta)
-    destino = DestinoLocal(pasta / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, DIAS_AVANCADOS, spark=spark, roteiro=roteiro)
+def gerado(legados):
+    """Embarque com todos os defeitos de linha, até 05/01/2026 (geração `legados`)."""
+    roteiro = carregar_roteiro(legados.roteiro)
+    assert {t: roteiro.defeitos[t].taxas["embarque"] for t in TAXAS_DE_TESTE} == TAXAS_DE_TESTE
+    destino = legados.final
     return destino, _operacoes(destino), _gabarito(destino)
 
 
@@ -169,7 +140,7 @@ def test_todo_defeito_observavel_na_landing_tem_registro_no_gabarito(gerado):
         assert list(r["artigos"]) == artigos[r["tipo"]]
         assert r["data_entrega"] is not None
     assert max(r["data_entrega"] for r in gabarito["defeitos"]) > date(2025, 12, 31), (
-        "o avancar_tempo também registra os defeitos dos dias novos"
+        "os defeitos dos lotes depois da carga de referência também são registrados"
     )
 
 

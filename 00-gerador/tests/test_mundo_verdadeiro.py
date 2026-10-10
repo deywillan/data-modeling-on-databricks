@@ -3,17 +3,20 @@
 Os volumes esperados vêm do Estudo de Caso (escala 1: 20 mil pessoas, 1,5 mil empresas PJ,
 3 mil veículos, dos quais 400 na frota própria, e 3 mil vendas); a escala multiplica
 linearmente.
+
+O mundo não depende da fatia nem dos ajustes do roteiro de teste (que só mexem nos sistemas),
+então o módulo lê o gabarito das gerações compartilhadas: a `principal` (escala 0,05) e a
+`legados` (escala 0,1, o dobro). O teste lento gera o mundo de novo para comparar.
 """
 
 import re
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
 
-from modelbricks_gerador import DestinoLocal, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ARTIGO = "03-3fn"  # fatia com gabarito
-ESCALA = 0.05
+ESCALA = 0.05  # escala da geração `principal`
 TABELAS = {
     "pessoas", "empresas_pj", "veiculos", "vendas_veiculos", "municipios",
     "rotas", "bases", "lojas", "colaboradores", "participacoes",
@@ -21,25 +24,26 @@ TABELAS = {
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    return geracoes.gabarito(destino)
 
 
 @pytest.fixture(scope="module")
-def mundo(spark, tmp_path_factory):
-    destino = DestinoLocal(tmp_path_factory.mktemp("mundo") / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark)
-    return destino, _gabarito(destino)
+def mundo(principal):
+    assert geracoes.PRINCIPAL.escala == ESCALA
+    return principal.final, _gabarito(principal.final)
 
 
-def test_gabarito_tem_as_tabelas_do_mundo_e_nada_dele_vai_para_a_landing(mundo):
+def test_gabarito_tem_as_tabelas_do_mundo_e_nada_dele_vai_para_a_landing(mundo, principal):
     destino, tabelas = mundo
 
     assert set(tabelas) == TABELAS | {"mapa_chaves", "defeitos"}
     entregues = [p.relative_to(destino.volume).as_posix() for p in destino.volume.rglob("*") if p.is_file()]
-    # A landing tem só pastas de sistema; entidades de sistema podem ter o nome de uma
-    # tabela do mundo (ex.: `patio/veiculos/`), mas nunca na raiz nem em Parquet do gabarito.
-    assert not [c for c in entregues if c.split("/")[0] in TABELAS or c.endswith(".parquet")]
+    # A landing tem só pastas dos sistemas da fatia e o controle do relógio. Entidades de
+    # sistema podem ter o nome de uma tabela do mundo (ex.: `patio/veiculos/`) e o Núcleo
+    # entrega Parquet, mas nada do gabarito fica fora dessas pastas.
+    raizes = set(carregar_roteiro(principal.roteiro).fatia(geracoes.PRINCIPAL.artigo).sistemas) | {"_controle"}
+    assert {c.split("/")[0] for c in entregues} <= raizes
+    assert not [c for c in entregues if "gabarito" in c]
 
 
 def test_volumes_da_escala_vem_do_estudo_de_caso(mundo):
@@ -53,11 +57,10 @@ def test_volumes_da_escala_vem_do_estudo_de_caso(mundo):
     assert len(tabelas["municipios"]) == 5571
 
 
-def test_contagens_sao_proporcionais_a_escala(spark, tmp_path, mundo):
+def test_contagens_sao_proporcionais_a_escala(mundo, legados):
     _, na_escala = mundo
-    destino = DestinoLocal(tmp_path / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA * 2, spark=spark)
-    no_dobro = _gabarito(destino)
+    assert geracoes.LEGADOS.escala == ESCALA * 2
+    no_dobro = _gabarito(legados.final)
 
     for tabela in ("pessoas", "empresas_pj", "veiculos", "vendas_veiculos", "rotas", "colaboradores"):
         assert len(no_dobro[tabela]) == 2 * len(na_escala[tabela]), tabela
@@ -65,12 +68,13 @@ def test_contagens_sao_proporcionais_a_escala(spark, tmp_path, mundo):
     assert len(no_dobro["municipios"]) == len(na_escala["municipios"])  # referência, não escala
 
 
-def test_mesma_escala_e_roteiro_produzem_gabarito_identico(spark, tmp_path, mundo):
+@pytest.mark.lento
+def test_mesma_escala_e_roteiro_produzem_gabarito_identico(mundo, mundo_de_novo):
     _, primeira = mundo
-    destino = DestinoLocal(tmp_path / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark)
+    assert geracoes.MUNDO.escala == ESCALA
+    segunda = _gabarito(mundo_de_novo.final)  # outra fatia, gerada agora (sem cache)
 
-    assert _gabarito(destino) == primeira
+    assert {t: segunda[t] for t in TABELAS} == {t: primeira[t] for t in TABELAS}
 
 
 def _empresas_por_pessoa(tabelas) -> dict[int, set[str]]:

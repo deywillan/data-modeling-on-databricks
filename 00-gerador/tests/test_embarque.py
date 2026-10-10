@@ -2,6 +2,9 @@
 
 Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e, nas
 fatias com gabarito, as tabelas do schema `gabarito`.
+
+Usa a geração `principal` (compartilhada, ver `geracoes.py`): o *Embarque* com as taxas do
+roteiro oficial, carga inicial e avanço até o dia do reajuste de tarifas.
 """
 
 import json
@@ -10,20 +13,18 @@ from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.05  # a menor escala com rotas suficientes para a Viação
 CARGA_INICIAL = date(2025, 12, 31)
 REAJUSTE = date(2026, 1, 12)
 ENTIDADES = {"clientes": "id_cliente", "tarifas": "id_tarifa", "passagens": "id_passagem"}
 
 
 def _arquivos_embarque(destino: DestinoLocal) -> dict[str, bytes]:
-    pasta = destino.volume / "embarque"
-    return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
+    return geracoes.arquivos(destino, "embarque")
 
 
 def _linhas(arquivos: dict[str, bytes]) -> list[dict]:
@@ -62,21 +63,14 @@ def _aplicar(operacoes: list[dict], ate: date | None = None) -> dict[str, dict]:
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
     """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do Embarque (a fatia
     tem outros sistemas)."""
-    pasta = destino.raiz / "gabarito"
-    tabelas = {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
-    for nome in ("mapa_chaves", "defeitos"):
-        tabelas[nome] = [r for r in tabelas[nome] if r["sistema"] == "embarque"]
-    return tabelas
+    return geracoes.gabarito(destino, "embarque")
 
 
 @pytest.fixture(scope="module")
-def com_gabarito(spark, tmp_path_factory):
-    """Fatia 03-3fn (com gabarito): carga inicial e avanço até o dia do reajuste de tarifas."""
-    destino = DestinoLocal(tmp_path_factory.mktemp("embarque") / "medalhao_03_3fn")
-    gerar_fatia("03-3fn", destino, escala=ESCALA, spark=spark)
-    carga = _arquivos_embarque(destino)
-    avancar_tempo("03-3fn", destino, (REAJUSTE - CARGA_INICIAL).days, spark=spark)
-    return destino, carga, _arquivos_embarque(destino)
+def com_gabarito(principal):
+    """Carga inicial e avanço até o dia do reajuste de tarifas (geração `principal`)."""
+    assert principal.resultados[-1].data_relogio == REAJUSTE
+    return principal.final, _arquivos_embarque(principal.etapas[0]), _arquivos_embarque(principal.final)
 
 
 def test_lotes_cdc_chegam_um_arquivo_json_por_entidade_e_dia_simulado(com_gabarito):
@@ -207,16 +201,14 @@ def test_reajuste_de_tarifas_do_roteiro_atualiza_todas_as_tarifas_em_12_01_2026(
     assert {o["valor"] for o in vendas_no_reajuste} <= {t["valor"] for t in estado["tarifas"].values()}
 
 
-def test_gerar_sistema_ou_dia_isoladamente_produz_o_mesmo_conteudo(spark, tmp_path, com_gabarito):
+@pytest.mark.lento
+def test_gerar_sistema_ou_dia_isoladamente_produz_o_mesmo_conteudo(com_gabarito, principal_em_partes):
     _, carga, completo = com_gabarito
-    # Outra fatia (Embarque sem os sistemas do 03-3fn), carga até 05/01/2026 e avanço de 1 dia.
-    destino = DestinoLocal(tmp_path / "medalhao_07_star_schema")
-    gerar_fatia("07-star-schema", destino, escala=ESCALA, ate=date(2026, 1, 5), spark=spark)
-    avancar_tempo("07-star-schema", destino, 1, spark=spark)
-    isolado = _arquivos_embarque(destino)
+    # Outra fatia (sem o Rastro), carga até 09/01/2026, um avanço de 1 dia e outro de 2.
+    em_partes = _arquivos_embarque(principal_em_partes.final)
 
-    assert isolado == {c: v for c, v in completo.items() if c.split("/")[2] <= "2026-01-06"}
-    assert {c: v for c, v in isolado.items() if c.split("/")[2] <= "2025-12-31"} == carga
+    assert em_partes == completo
+    assert {c: v for c, v in em_partes.items() if c.split("/")[2] <= "2025-12-31"} == carga
 
 
 def test_roteiro_do_estudo_de_caso_so_reentrega_cdc_no_embarque_na_taxa_do_roteiro(com_gabarito):

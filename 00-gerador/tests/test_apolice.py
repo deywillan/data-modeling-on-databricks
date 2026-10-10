@@ -4,9 +4,9 @@ com valor monetário como texto ("1.234,56").
 Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e as
 tabelas do schema `gabarito`.
 
-Para poupar a cota, o módulo usa uma cópia do roteiro em que a fatia 03-3fn (com gabarito)
-tem só o *Apólice+*, e em que toda venda de veículo a um segurado leva o seguro (para que
-a escala mínima tenha seguros vendidos junto com veículos).
+Para poupar a cota, o módulo usa a geração `principal` (ver `geracoes.py`), compartilhada
+com os outros sistemas, cujo roteiro de teste faz toda venda de veículo a um segurado levar
+o seguro (para que a escala mínima tenha seguros vendidos junto com veículos).
 """
 
 import csv
@@ -16,38 +16,23 @@ import re
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
-from importlib import resources
 
-import pyarrow.parquet as pq
+import geracoes
 import pytest
-import yaml
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.05
-ARTIGO = "03-3fn"
+ESCALA = geracoes.PRINCIPAL.escala
 CARGA_INICIAL = date(2025, 12, 31)
-ULTIMO_DIA = date(2026, 1, 10)
+ULTIMO_DIA = date(2026, 1, 12)
 ENTIDADES = {"segurados": "codigo_segurado", "apolices": "numero_apolice"}
 MONETARIAS = ("importancia_segurada", "premio")
 PADRAO = re.compile(r"apolice/([a-z_]+)/(\d{4}-\d{2}-\d{2})/\1_(\d{8})_0001\.csv")
 TEXTO_MONETARIO = re.compile(r"\d{1,3}(\.\d{3})*,\d{2}")
 
 
-def _roteiro_de_teste(pasta):
-    dados = yaml.safe_load(
-        resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
-    )
-    dados["fatias"][ARTIGO]["sistemas"] = ["apolice"]
-    dados["parametros"]["apolice"]["seguro_na_venda"] = 1.0
-    caminho = pasta / "roteiro.yaml"
-    caminho.write_text(yaml.safe_dump(dados, allow_unicode=True), encoding="utf-8")
-    return caminho
-
-
 def _arquivos(destino: DestinoLocal) -> dict[str, bytes]:
-    pasta = destino.volume / "apolice"
-    return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
+    return geracoes.arquivos(destino, "apolice")
 
 
 def _linhas(arquivos: dict[str, bytes]) -> dict[str, list[dict]]:
@@ -81,11 +66,7 @@ def _numero(texto: str) -> Decimal:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    pasta = destino.raiz / "gabarito"
-    return {
-        p.name: [r for parte in sorted(p.glob("*.parquet")) for r in pq.read_table(parte).to_pylist()]
-        for p in sorted(pasta.iterdir()) if p.is_dir()
-    }
+    return geracoes.gabarito(destino, "apolice")
 
 
 def _segurados_verdadeiros(gabarito) -> dict[str, tuple[str, int]]:
@@ -98,19 +79,13 @@ def _segurados_verdadeiros(gabarito) -> dict[str, tuple[str, int]]:
 
 
 @pytest.fixture(scope="module")
-def roteiro(tmp_path_factory):
-    return _roteiro_de_teste(tmp_path_factory.mktemp("roteiro_apolice"))
-
-
-@pytest.fixture(scope="module")
-def gerado(spark, tmp_path_factory, roteiro):
-    """Carga inicial e avanço de 10 dias."""
-    destino = DestinoLocal(tmp_path_factory.mktemp("apolice") / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark, roteiro=roteiro)
-    carga = _arquivos(destino)
-    avancar_tempo(ARTIGO, destino, (ULTIMO_DIA - CARGA_INICIAL).days, spark=spark, roteiro=roteiro)
+def gerado(principal):
+    """Carga inicial e avanço de 12 dias (geração `principal`)."""
+    assert carregar_roteiro(principal.roteiro).parametros.apolice.seguro_na_venda == 1.0
+    assert principal.resultados[-1].data_relogio == ULTIMO_DIA
+    destino = principal.final
     arquivos = _arquivos(destino)
-    return destino, carga, arquivos, _linhas(arquivos), _gabarito(destino)
+    return destino, _arquivos(principal.etapas[0]), arquivos, _linhas(arquivos), _gabarito(destino)
 
 
 def test_lote_diario_em_csv_so_com_linhas_alteradas_no_dia(gerado):
@@ -282,10 +257,8 @@ def test_valor_monetario_como_texto_registrado_por_coluna_no_gabarito(gerado):
     assert max(r["data_entrega"] for r in registros) > CARGA_INICIAL, "o avancar_tempo acrescenta os registros"
 
 
-def test_gerar_em_partes_produz_os_mesmos_arquivos(spark, tmp_path, roteiro, gerado):
+@pytest.mark.lento
+def test_gerar_em_partes_produz_os_mesmos_arquivos(gerado, principal_em_partes):
     _, _, completo, _, _ = gerado
-    destino = DestinoLocal(tmp_path / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, ate=date(2026, 1, 4), spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 6, spark=spark, roteiro=roteiro)
 
-    assert _arquivos(destino) == completo
+    assert _arquivos(principal_em_partes.final) == completo

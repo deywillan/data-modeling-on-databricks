@@ -3,10 +3,10 @@
 Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e, nas
 fatias com gabarito, as tabelas do schema `gabarito`.
 
-Para poupar a cota, o módulo usa uma cópia do roteiro em que a fatia 03-3fn (com gabarito)
-tem só o *Núcleo*. O roteiro oficial não dá taxa de defeito ao *Núcleo*; a cópia ativa o
-evento atrasado para ele, para exercitar os atrasos injetados e registrados do motor
-incremental (que o *Apólice+* reutiliza).
+Para poupar a cota, o módulo usa a geração `principal` (ver `geracoes.py`), compartilhada
+com os outros sistemas. O roteiro oficial não dá taxa de defeito ao *Núcleo*; o roteiro de
+teste ativa o evento atrasado para ele, para exercitar os atrasos injetados e registrados
+do motor incremental (que o *Apólice+* reutiliza).
 """
 
 import io
@@ -14,19 +14,17 @@ import math
 import re
 from collections import defaultdict
 from datetime import date, datetime, timezone
-from importlib import resources
 
+import geracoes
 import pyarrow.parquet as pq
 import pytest
-import yaml
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, carregar_roteiro
 
-ESCALA = 0.05
-ARTIGO = "03-3fn"
+ESCALA = geracoes.PRINCIPAL.escala
 CARGA_INICIAL = date(2025, 12, 31)
-ULTIMO_DIA = date(2026, 1, 10)
-TAXA_ATRASO = 0.05
+ULTIMO_DIA = date(2026, 1, 12)
+TAXA_ATRASO = geracoes.TAXA_ATRASO_NUCLEO
 ENTIDADES = {
     "colaboradores": "matricula",
     "fornecedores": "codigo_fornecedor",
@@ -37,20 +35,8 @@ ENTIDADES = {
 PADRAO = re.compile(r"nucleo/([a-z_]+)/(\d{4}-\d{2}-\d{2})/\1_(\d{8})_0001\.parquet")
 
 
-def _roteiro_de_teste(pasta):
-    dados = yaml.safe_load(
-        resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
-    )
-    dados["fatias"][ARTIGO]["sistemas"] = ["nucleo"]
-    dados["defeitos"]["evento_atrasado"]["taxas"]["nucleo"] = TAXA_ATRASO
-    caminho = pasta / "roteiro.yaml"
-    caminho.write_text(yaml.safe_dump(dados, allow_unicode=True), encoding="utf-8")
-    return caminho
-
-
 def _arquivos(destino: DestinoLocal) -> dict[str, bytes]:
-    pasta = destino.volume / "nucleo"
-    return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
+    return geracoes.arquivos(destino, "nucleo")
 
 
 def _linhas(arquivos: dict[str, bytes]) -> dict[str, list[dict]]:
@@ -72,8 +58,7 @@ def _versoes(linhas: list[dict], chave: str) -> dict:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    pasta = destino.raiz / "gabarito"
-    return {p.name: pq.read_table(p).to_pylist() for p in sorted(pasta.iterdir()) if p.is_dir()}
+    return geracoes.gabarito(destino, "nucleo")
 
 
 def _mapa(gabarito, entidade: str) -> dict[str, int]:
@@ -85,19 +70,13 @@ def _mapa(gabarito, entidade: str) -> dict[str, int]:
 
 
 @pytest.fixture(scope="module")
-def roteiro(tmp_path_factory):
-    return _roteiro_de_teste(tmp_path_factory.mktemp("roteiro_nucleo"))
-
-
-@pytest.fixture(scope="module")
-def gerado(spark, tmp_path_factory, roteiro):
-    """Carga inicial e avanço de 10 dias."""
-    destino = DestinoLocal(tmp_path_factory.mktemp("nucleo") / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, spark=spark, roteiro=roteiro)
-    carga = _arquivos(destino)
-    avancar_tempo(ARTIGO, destino, (ULTIMO_DIA - CARGA_INICIAL).days, spark=spark, roteiro=roteiro)
+def gerado(principal):
+    """Carga inicial e avanço de 12 dias (geração `principal`)."""
+    assert carregar_roteiro(principal.roteiro).defeitos["evento_atrasado"].taxas["nucleo"] == TAXA_ATRASO
+    assert principal.resultados[-1].data_relogio == ULTIMO_DIA
+    destino = principal.final
     arquivos = _arquivos(destino)
-    return destino, carga, arquivos, _linhas(arquivos), _gabarito(destino)
+    return destino, _arquivos(principal.etapas[0]), arquivos, _linhas(arquivos), _gabarito(destino)
 
 
 def _atrasados(gabarito) -> set[tuple]:
@@ -279,11 +258,8 @@ def test_atrasos_do_roteiro_aplicados_e_registrados_no_gabarito(gerado):
     assert max(r["data_entrega"] for r in registros) > CARGA_INICIAL
 
 
-def test_gerar_em_partes_produz_os_mesmos_arquivos(spark, tmp_path, roteiro, gerado):
+@pytest.mark.lento
+def test_gerar_em_partes_produz_os_mesmos_arquivos(gerado, principal_em_partes):
     _, _, completo, _, _ = gerado
-    destino = DestinoLocal(tmp_path / "medalhao_03_3fn")
-    gerar_fatia(ARTIGO, destino, escala=ESCALA, ate=date(2026, 1, 4), spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 2, spark=spark, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 4, spark=spark, roteiro=roteiro)
 
-    assert _arquivos(destino) == completo
+    assert _arquivos(principal_em_partes.final) == completo

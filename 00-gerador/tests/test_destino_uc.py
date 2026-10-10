@@ -1,14 +1,21 @@
 """`gerar_fatia` gravando no Unity Catalog (`DestinoUC`), conferido por SQL no workspace.
 
-Usa um catálogo de teste próprio, removido no início e no fim da sessão de testes.
+Usa um catálogo de teste próprio, removido no início e no fim da sessão de testes. O que se
+testa é onde o destino grava, não a geração dos sistemas: a fatia 01-bronze é reduzida ao
+IBGE, o que poupa a geração e o envio de milhares de arquivos ao Volume. Marcado como
+`lento` porque cria e apaga um catálogo no workspace.
 """
 
+import geracoes
 import pytest
 
 from modelbricks_gerador import ArquivoJaExiste, DestinoUC, gerar_fatia
 from modelbricks_gerador.escritor import Arquivo
 
+pytestmark = pytest.mark.lento
+
 CATALOGO = "medalhao_01_bronze_t02"
+SO_IBGE = geracoes.roteiro_so_ibge()
 
 
 def _apagar_catalogo(spark):
@@ -49,7 +56,7 @@ def _arquivos_landing() -> list[tuple[str, int, int | None]]:
 
 
 def test_carga_inicial_cria_catalogo_schemas_volume_ibge_e_relogio(spark, destino_uc):
-    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01)
+    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
 
     assert resultado.gerou
     assert {"landing", "bronze", "silver", "gold"} <= _schemas(spark)
@@ -73,7 +80,7 @@ def test_carga_inicial_cria_catalogo_schemas_volume_ibge_e_relogio(spark, destin
 def test_reexecutar_sem_reset_nao_altera_nada(spark, destino_uc):
     antes = _arquivos_landing()
 
-    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01)
+    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
 
     assert not resultado.gerou
     assert "31/12/2025" in resultado.mensagem
@@ -93,7 +100,7 @@ def test_reset_recria_o_catalogo_do_zero(spark, destino_uc):
     antes = [arquivo[:2] for arquivo in _arquivos_landing()]
     spark.sql(f"CREATE TABLE {CATALOGO}.bronze.sobra_de_execucao_anterior (id INT)")
 
-    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, reset=True)
+    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, reset=True, roteiro=SO_IBGE)
 
     assert resultado.gerou
     assert _tabelas(spark, "bronze") == []
