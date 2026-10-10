@@ -17,6 +17,10 @@ ROTEIRO_PADRAO = "roteiro.yaml"
 _ARTIGO = re.compile(r"^(\d{2})-([a-z0-9-]+)$")
 
 
+# Formato dos arquivos que um sistema entrega na landing.
+FormatoDeEntrega = Literal["json", "json_aninhado", "parquet", "csv", "csv_latin1"]
+
+
 class RoteiroInvalido(ValueError):
     """O roteiro não pôde ser lido ou não passou na validação."""
 
@@ -318,7 +322,7 @@ class Sistema(_Modelo):
     nome: str
     empresa: str
     entrega: Literal["cdc", "incremental", "snapshot", "api", "stream", "historico_mais_snapshot", "referencia"]
-    formato: Literal["json", "json_aninhado", "parquet", "csv", "csv_latin1"]
+    formato: FormatoDeEntrega
 
 
 class Evento(_Modelo):

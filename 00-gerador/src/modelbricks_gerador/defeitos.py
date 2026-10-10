@@ -31,6 +31,7 @@ Defeitos de entrega (contrato com quem monta os lotes, ver `cdc.py`):
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .expressoes import uniforme
 from .roteiro import Roteiro
 from .sementes import semente
 
@@ -282,8 +283,7 @@ class Defeitos:
         return ", ".join(alvo.chave)
 
     def _sorteio(self, tipo: str, alvo: Alvo, *extra: str) -> str:
-        colunas = ", ".join((*alvo.chave, *extra))
-        return f"(pmod(xxhash64({self._semente(tipo, alvo)}, {colunas}), 1000000) / 1000000.0)"
+        return uniforme(self._semente(tipo, alvo), *alvo.chave, *extra)
 
     def _sorteado(self, tipo: str, alvo: Alvo, *extra: str) -> "Column":
         from pyspark.sql import functions as F
@@ -345,10 +345,10 @@ class Defeitos:
         atraso = self.roteiro.defeitos[tipo].atraso_dias
         if atraso is None:
             raise ValueError(f"defeitos.{tipo}: falta atraso_dias no roteiro.")
-        semente_ = self._semente(tipo, alvo)
+        semente_do_tipo = self._semente(tipo, alvo)
         colunas = ", ".join((*alvo.chave, instante))
-        dias = f"({atraso.minimo} + pmod(xxhash64({semente_}, {colunas}, 1), {atraso.maximo - atraso.minimo + 1}))"
-        ajuste = f"pmod(xxhash64({semente_}, {colunas}, 2), 3600)"
+        dias = f"({atraso.minimo} + pmod(xxhash64({semente_do_tipo}, {colunas}, 1), {atraso.maximo - atraso.minimo + 1}))"
+        ajuste = f"pmod(xxhash64({semente_do_tipo}, {colunas}, 2), 3600)"
         return F.expr(f"timestamp_seconds(unix_seconds(_entrega) + {dias} * {_SEGUNDOS_DIA} + {ajuste})")
 
     @staticmethod

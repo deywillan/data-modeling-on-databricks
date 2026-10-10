@@ -168,12 +168,12 @@ def _lotes(sistema, linhas: "DataFrame", datas, cabecalhos, separador, encoding,
         """Gera os lotes das datas pendentes até `ate` (inclusive; `None` = todas)."""
         for data_foto in pendentes:
             for entidade, colunas in cabecalhos.items():
-                linhas_ = grupos.get(entidade, []) if data_foto.isoformat() == atual else []
-                conteudo = "".join(f"{linha}\n" for linha in [separador.join(colunas), *linhas_])
+                linhas_do_arquivo = grupos.get(entidade, []) if data_foto.isoformat() == atual else []
+                conteudo = "".join(f"{linha}\n" for linha in [separador.join(colunas), *linhas_do_arquivo])
                 arquivo = Arquivo(
                     caminho_landing(sistema, entidade, data_foto, "csv"), conteudo.encode(encoding, errors="strict")
                 )
-                lotes.append(Lote(sistema, entidade, data_foto, formato, len(linhas_), arquivo))
+                lotes.append(Lote(sistema, entidade, data_foto, formato, len(linhas_do_arquivo), arquivo))
             if data_foto.isoformat() == ate:
                 return
 

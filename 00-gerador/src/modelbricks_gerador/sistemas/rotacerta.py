@@ -34,8 +34,8 @@ from typing import TYPE_CHECKING
 from ..cdc import Mudancas, entrega_cdc
 from ..chaves import chave_do_sistema, mapa
 from ..defeitos import Alvo, Defeitos
-from ..mundo import linhas as linhas_na_escala
-from .base import Contexto, Entrega, calendario, materializar
+from ..expressoes import instante
+from .base import Contexto, Entrega, calendario, linhas_por_dia, materializar, volume_por_dia
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -156,7 +156,6 @@ class _Projecao:
         from pyspark.sql import functions as F
 
         p = self.p
-        eventos = self.roteiro.parametros.eventos_por_frete
         horas = p.horario_operacao
         dias = p.dias_entre_eventos
         ciclo = p.ciclo
@@ -217,9 +216,7 @@ class _Projecao:
         primeira = max(datas.inicio, inicio - timedelta(days=duracao + 1 + self.defeitos.folga_dias()))
 
         # Fretes por dia: o volume do roteiro dividido pelos dias da história.
-        dias_historia = (datas.carga_inicial - datas.inicio).days + 1
-        por_dia = linhas_na_escala(self.roteiro.volumes.fretes_rotacerta, self.contexto.escala) / dias_historia
-        inteiro, fracao = int(por_dia), por_dia - int(por_dia)
+        inteiro, fracao = volume_por_dia(self.contexto, self.roteiro.volumes.fretes_rotacerta)
 
         # Clientes e caminhões elegíveis num dia: os cadastrados até ele, numerados por ordem de cadastro.
         def numerados(df: "DataFrame", chave: str, data: str, indice: str) -> "DataFrame":
@@ -232,19 +229,15 @@ class _Projecao:
         def novos(df: "DataFrame", data: str, saida: str) -> "DataFrame":
             return df.groupBy(F.col(data).alias("data")).agg(F.count(F.lit(1)).alias(saida))
 
-        dias = (
+        dias = linhas_por_dia(
             self.calendario()
             .join(novos(clientes, "data_cadastro", "_novos_clientes"), "data", "left")
             .join(novos(caminhoes, "data_aquisicao", "_novos_caminhoes"), "data", "left")
             .withColumn("_clientes", F.sum(F.coalesce("_novos_clientes", F.lit(0))).over(acumulado))
             .withColumn("_caminhoes", F.sum(F.coalesce("_novos_caminhoes", F.lit(0))).over(acumulado))
             .where(F.col("data") >= F.lit(primeira))
-            .where("_clientes > 0 AND _caminhoes > 0")
-            .withColumn("_n_dia", F.expr(
-                f"{inteiro} + CASE WHEN pmod(xxhash64(semente, 0), 1000000) / 1000000.0 < {fracao!r} THEN 1 ELSE 0 END"))
-            .where("_n_dia > 0")
-            .select("data", "semente", "_clientes", "_caminhoes",
-                    F.explode(F.sequence(F.lit(1), F.col("_n_dia"))).alias("n"))
+            .where("_clientes > 0 AND _caminhoes > 0"),
+            inteiro, fracao, "_clientes", "_caminhoes",
         )
         total_destinos = self.destinos.agg(F.count(F.lit(1)).alias("_destinos"))
 
@@ -257,8 +250,7 @@ class _Projecao:
                 "pmod(xxhash64(semente, n, 1), _clientes) AS _indice_cliente",
                 "pmod(xxhash64(semente, n, 2), _caminhoes) AS _indice_caminhao",
                 "pmod(xxhash64(semente, n, 3), _destinos) AS _sorteio_destino",
-                f"timestamp_seconds(unix_seconds(cast(data AS timestamp)) + {horas.minimo * 3600} "
-                f"+ pmod(xxhash64(semente, n, 4), {(horas.maximo - horas.minimo) * 3600})) AS data_hora_abertura",
+                f"{instante('data', horas, 'semente', 'n', 4)} AS data_hora_abertura",
                 f"cast({peso.minimo} + pmod(xxhash64(semente, n, 5), {peso.maximo - peso.minimo + 1}) AS int) AS peso_kg",
                 f"date_add(data, cast({prazo.minimo} + pmod(xxhash64(semente, n, 6), "
                 f"{prazo.maximo - prazo.minimo + 1}) AS int)) AS data_prevista_entrega",

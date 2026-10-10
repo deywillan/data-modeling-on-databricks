@@ -28,8 +28,9 @@ from typing import TYPE_CHECKING
 from ..cdc import Mudancas
 from ..chaves import chave_do_sistema, mapa
 from ..defeitos import Alvo, Defeitos
+from ..expressoes import instante, sorteio, uniforme_do_lote
 from . import legados
-from .base import Contexto, Entrega, calendario, materializar
+from .base import Contexto, Entrega, calendario, linhas_por_dia, materializar
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -183,24 +184,18 @@ class _Projecao:
             (F.row_number().over(Window.orderBy("data_cadastro", "cod_cliente")) - 1).alias("_indice_cliente"),
         )
         cadastros = clientes.groupBy(F.col("data_cadastro").alias("data")).agg(F.count(F.lit(1)).alias("_novos"))
-        dias = (
+        dias = linhas_por_dia(
             calendario(self.contexto, SISTEMA, self.fim)
             .join(cadastros, "data", "left")
             .withColumn("_clientes", F.sum(F.coalesce("_novos", F.lit(0))).over(
                 Window.orderBy("data").rowsBetween(Window.unboundedPreceding, Window.currentRow)))
-            .where("_clientes > 0")
-            .withColumn("_n_dia", F.expr(
-                f"{inteiro} + CASE WHEN pmod(xxhash64(semente, 0), 1000000) / 1000000.0 < {fracao!r} THEN 1 ELSE 0 END"))
-            .where("_n_dia > 0")
-            .select("data", "semente", "_clientes", F.explode(F.sequence(F.lit(1), F.col("_n_dia"))).alias("n"))
+            .where("_clientes > 0"),
+            inteiro, fracao, "_clientes",
         )
-        linhas_ = self.linhas.select(
+        linhas_numeradas = self.linhas.select(
             "cod_linha", "tarifa", (F.row_number().over(Window.orderBy("cod_linha")) - 1).alias("_indice_linha"),
         )
-        total_linhas = linhas_.agg(F.count(F.lit(1)).alias("_linhas"))
-
-        def u(k: int) -> str:
-            return f"(pmod(xxhash64(semente, n, {k}), 1000000) / 1000000.0)"
+        total_linhas = linhas_numeradas.agg(F.count(F.lit(1)).alias("_linhas"))
 
         horas, antecedencia = p.horario_vendas, p.antecedencia_compra_dias
         return (
@@ -211,19 +206,18 @@ class _Projecao:
                 "cast(date_format(data, 'yyyyMMdd') AS bigint) * 100000 + n AS num_bilhete",
                 "pmod(xxhash64(semente, n, 1), _clientes) AS _indice_cliente",
                 "pmod(xxhash64(semente, n, 2), _linhas) AS _indice_linha",
-                f"timestamp_seconds(unix_seconds(cast(data AS timestamp)) + {horas.minimo * 3600} "
-                f"+ pmod(xxhash64(semente, n, 3), {(horas.maximo - horas.minimo) * 3600})) AS data_hora_venda",
+                f"{instante('data', horas, 'semente', 'n', 3)} AS data_hora_venda",
                 f"cast({antecedencia.minimo} + pmod(xxhash64(semente, n, 4), "
                 f"{antecedencia.maximo - antecedencia.minimo + 1}) AS int) AS _antecedencia",
-                f"{legados.sorteio(p.canais, u(5))} AS canal",
+                f"{sorteio(p.canais, uniforme_do_lote(5))} AS canal",
                 f"cast(1 + pmod(xxhash64(semente, n, 6), {p.poltronas}) AS int) AS poltrona",
-                f"{u(7)} AS _u_cancelamento",
-                f"{u(9)} AS _u_momento",
+                f"{uniforme_do_lote(7)} AS _u_cancelamento",
+                f"{uniforme_do_lote(9)} AS _u_momento",
             )
             .withColumn("data_viagem", F.expr("date_add(data, _antecedencia)"))
             .withColumn("_cancelada", F.expr(f"_antecedencia > 0 AND _u_cancelamento < {p.cancelamento!r}"))
             .join(clientes.select("cod_cliente", "_indice_cliente"), "_indice_cliente")
-            .join(linhas_, "_indice_linha")
+            .join(linhas_numeradas, "_indice_linha")
             .withColumnRenamed("tarifa", "valor")
         )
 
