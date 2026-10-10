@@ -41,6 +41,8 @@ _GERACOES = {
     "principal": geracoes.PRINCIPAL,
     "fatia_10": geracoes.FATIA_10,
     "fatia_01": geracoes.FATIA_01,
+    "fatia_02": geracoes.FATIA_02,
+    "fatia_03": geracoes.FATIA_03,
     "legados": geracoes.LEGADOS,
     "legados_em_partes": geracoes.LEGADOS_EM_PARTES,
     "fatia_05": geracoes.FATIA_05,
@@ -167,6 +169,18 @@ def patio_em_partes(request, tmp_path_factory):
 def fatia_01(request, tmp_path_factory):
     """Fatia 01-bronze inteira do artigo: carga inicial e avanço de 1 dia."""
     return _obter(geracoes.FATIA_01, request, tmp_path_factory)
+
+
+@pytest.fixture(scope="session")
+def fatia_02(request, tmp_path_factory):
+    """Fatia 02-historizacao inteira (Pátio, Embarque, Núcleo e RotaCerta), sem gabarito."""
+    return _obter(geracoes.FATIA_02, request, tmp_path_factory)
+
+
+@pytest.fixture(scope="session")
+def fatia_03(request, tmp_path_factory):
+    """Fatia 03-3fn inteira (Núcleo, Embarque, Pátio e Apólice+), com gabarito."""
+    return _obter(geracoes.FATIA_03, request, tmp_path_factory)
 
 
 @pytest.fixture(scope="session")
