@@ -188,3 +188,17 @@ def test_nomes_e_enderecos_cabem_em_latin1_para_os_sistemas_legados(mundo):
         (pessoa["nome"] + pessoa["logradouro"]).encode("latin-1")
     for empresa in tabelas["empresas_pj"]:
         (empresa["razao_social"] + empresa["logradouro"]).encode("latin-1")
+
+
+def test_cada_empresa_distribuida_tem_ao_menos_o_minimo_de_instancias(mundo):
+    _, tabelas = mundo
+    m = carregar_roteiro().mundo
+
+    assert m.minimo_por_empresa >= 1
+    for tabela, pesos in (
+        ("rotas", m.rotas.empresas), ("bases", m.bases), ("lojas", m.lojas), ("colaboradores", m.colaboradores),
+    ):
+        por_empresa = {empresa: 0 for empresa in pesos}
+        for linha in tabelas[tabela]:
+            por_empresa[linha["empresa"]] += 1
+        assert all(n >= m.minimo_por_empresa for n in por_empresa.values()), (tabela, por_empresa)

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 CATALOGO_ALTERNATIVO = "medalhao"
 VOLUME_LANDING = "landing"
-_THREADS_UPLOAD = 16
+_THREADS_UPLOAD = 32
 _NUMERO_ARTIGO = re.compile(r"^medalhao_(\d{2})_")
 
 Modo = Literal["catalogo", "alternativo"]

@@ -121,16 +121,41 @@ class _Gerador:
             "veiculos": linhas(v.veiculos, escala),
             "frota": linhas(v.veiculos_frota_propria, escala),
             "vendas": linhas(v.vendas_veiculos, escala),
-            "rotas": linhas(v.rotas, escala),
-            "bases": linhas(v.bases, escala),
-            "lojas": linhas(v.lojas, escala),
-            "colaboradores": linhas(v.colaboradores, escala),
+            "rotas": self.com_minimo(linhas(v.rotas, escala), self.m.rotas.empresas),
+            "bases": self.com_minimo(linhas(v.bases, escala), self.m.bases),
+            "lojas": self.com_minimo(linhas(v.lojas, escala), self.m.lojas),
+            "colaboradores": self.com_minimo(linhas(v.colaboradores, escala), self.m.colaboradores),
         }
         # A escala arredonda cada volume: mantém as relações que o roteiro garante.
         self.n["vendas"] = min(max(self.n["vendas"], self.n["frota"]), self.n["veiculos"])
         self.n["colaboradores"] = min(self.n["colaboradores"], self.n["pessoas"])
 
     # -- utilitários ---------------------------------------------------------------------
+
+    def com_minimo(self, total: int, pesos: dict[str, float]) -> int:
+        """Total de instâncias de uma população distribuída entre empresas, com o mínimo por
+        empresa do roteiro (`mundo.minimo_por_empresa`): numa escala pequena, nenhuma empresa
+        fica sem instância (ex.: a Viação sem rotas)."""
+        return max(total, self.m.minimo_por_empresa * len(pesos))
+
+    def coluna_empresa(self, coluna_id: str, pesos: dict[str, float]) -> list:
+        """Colunas de `empresa`: sorteio por pesos, e as primeiras instâncias fixadas, uma
+        rodada por empresa (em ordem alfabética), até cumprir o mínimo por empresa."""
+        from dbldatagen.core.spec import dsl
+        from dbldatagen.core.spec.schema import WeightedValues
+
+        empresas = sorted(pesos)
+        garantidas = self.m.minimo_por_empresa * len(empresas)
+        return [
+            dsl.text("_empresa_sorteada", empresas, distribution=WeightedValues(weights=pesos)),
+            dsl.expression(
+                "empresa",
+                f"CASE WHEN {coluna_id} <= {garantidas} "
+                f"THEN element_at(array({', '.join(map(_literal, empresas))}), "
+                f"cast(pmod({coluna_id} - 1, {len(empresas)}) + 1 AS int)) "
+                "ELSE _empresa_sorteada END",
+            ),
+        ]
 
     def semente(self, *partes: object) -> int:
         return semente(self.roteiro.seed_base, "mundo", *partes)
@@ -342,12 +367,11 @@ class _Gerador:
 
     def rotas(self):
         from dbldatagen.core.spec import dsl
-        from dbldatagen.core.spec.schema import WeightedValues
 
         r = self.m.rotas
         return self.tabela("rotas", self.n["rotas"], [
             dsl.pk_auto("id_rota"),
-            dsl.text("empresa", sorted(r.empresas), distribution=WeightedValues(weights=r.empresas)),
+            *self.coluna_empresa("id_rota", r.empresas),
             dsl.text("_origem", self.codigos),
             dsl.text("_destino", self.codigos),
             dsl.text("_destino_alternativo", self.codigos),
@@ -368,18 +392,16 @@ class _Gerador:
 
     def _local(self, nome: str, chave: str, pesos: dict[str, float]):
         from dbldatagen.core.spec import dsl
-        from dbldatagen.core.spec.schema import WeightedValues
 
         return self.tabela(nome, self.n[nome], [
             dsl.pk_auto(chave),
-            dsl.text("empresa", sorted(pesos), distribution=WeightedValues(weights=pesos)),
+            *self.coluna_empresa(chave, pesos),
             dsl.text("_municipio", self.codigos),
             dsl.expression("cod_municipio", "cast(_municipio AS int)"),
         ])
 
     def colaboradores(self):
         from dbldatagen.core.spec import dsl
-        from dbldatagen.core.spec.schema import WeightedValues
 
         pesos = self.m.colaboradores
         admissao = self.m.admissao_colaboradores
@@ -393,7 +415,7 @@ class _Gerador:
             dsl.pk_auto("id_colaborador"),
             # As últimas pessoas do mundo são os colaboradores: uma pessoa, um vínculo.
             dsl.expression("id_pessoa", f"cast({self.n['pessoas']} - id_colaborador + 1 AS long)"),
-            dsl.text("empresa", sorted(pesos), distribution=WeightedValues(weights=pesos)),
+            *self.coluna_empresa("id_colaborador", pesos),
             dsl.integer("_k_cargo", min=0, max=999999),
             dsl.expression("cargo", f"CASE empresa {cargo} END"),
             dsl.timestamp("_admissao", start=admissao.inicio.isoformat(), end=admissao.fim.isoformat()),

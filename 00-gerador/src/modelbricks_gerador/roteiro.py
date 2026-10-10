@@ -282,6 +282,7 @@ class ParametrosMundo(_Modelo):
     """Parâmetros do mundo verdadeiro (entidades mestres e participação nas empresas)."""
 
     tamanho_pools: int = Field(gt=0)
+    minimo_por_empresa: int = Field(ge=0)
     ufs_atuacao: list[str] = Field(min_length=1)
     idade_pessoas: Intervalo
     abertura_empresas: Periodo

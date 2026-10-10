@@ -24,7 +24,7 @@ from modelbricks_gerador import DestinoLocal, carregar_roteiro, gerar_fatia
 pytestmark = pytest.mark.lento
 
 ARTIGO = "01-bronze"
-ESCALA = geracoes.ESCALA_FATIA_INTEIRA  # menor escala com rota da Viação (a 0,01 não tem passagens)
+ESCALA = geracoes.ESCALA_FATIA_INTEIRA
 CARGA_INICIAL = date(2025, 12, 31)
 DIA_NOVO = "2026-01-01"
 SISTEMAS = {"embarque", "patio", "passagemhub", "rastro", "ibge"}
