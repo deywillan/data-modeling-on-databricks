@@ -41,6 +41,7 @@ _GERACOES = {
     "principal": geracoes.PRINCIPAL,
     "fatia_10": geracoes.FATIA_10,
     "fatia_01": geracoes.FATIA_01,
+    "fatia_01_minima": geracoes.FATIA_01_MINIMA,
     "fatia_02": geracoes.FATIA_02,
     "fatia_03": geracoes.FATIA_03,
     "legados": geracoes.LEGADOS,
@@ -169,6 +170,12 @@ def patio_em_partes(request, tmp_path_factory):
 def fatia_01(request, tmp_path_factory):
     """Fatia 01-bronze inteira do artigo: carga inicial e avanço de 1 dia."""
     return _obter(geracoes.FATIA_01, request, tmp_path_factory)
+
+
+@pytest.fixture(scope="session")
+def fatia_01_minima(request, tmp_path_factory):
+    """Fatia 01-bronze na escala mínima do projeto (0,01), só a carga inicial."""
+    return _obter(geracoes.FATIA_01_MINIMA, request, tmp_path_factory)
 
 
 @pytest.fixture(scope="session")
