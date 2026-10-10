@@ -119,6 +119,29 @@ def test_landing_nunca_sobrescreve(destino_uc, carga_inicial):
     assert destino_uc.ler(caminho).startswith(b"cod_municipio,nome_municipio")
 
 
+def test_arquivo_ja_gravado_com_os_mesmos_bytes_conta_como_gravado(destino_uc, carga_inicial):
+    caminho = "ibge/municipios/2025-12-31/municipios_20251231_0001.csv"
+    conteudo = destino_uc.ler(caminho)
+
+    destino_uc.gravar_arquivos([Arquivo(caminho, conteudo)])  # nova tentativa de uma chamada que caiu
+
+    assert destino_uc.ler(caminho) == conteudo
+
+
+def test_apagar_do_gabarito_remove_so_as_linhas_a_partir_da_data(spark, destino_uc, carga_inicial):
+    from datetime import date
+
+    destino_uc.preparar(("gabarito",))
+    linhas = [(date(2026, 1, 1), "antes"), (date(2026, 1, 2), "no_dia"), (date(2026, 1, 3), "depois"), (None, "sem_data")]
+    destino_uc.gravar_gabarito("defeitos_de_teste", spark.createDataFrame(linhas, "data_entrega date, rotulo string"))
+
+    destino_uc.apagar_do_gabarito("defeitos_de_teste", "data_entrega", date(2026, 1, 2))
+    destino_uc.apagar_do_gabarito("tabela_que_nao_existe", "data_entrega", date(2026, 1, 2))  # não faz nada
+
+    restantes = spark.table(f"{destino_uc.schema('gabarito')}.defeitos_de_teste").collect()
+    assert sorted(r["rotulo"] for r in restantes) == ["antes", "sem_data"]
+
+
 def test_reset_recria_o_catalogo_do_zero(spark, catalogo, destino_uc, carga_inicial):
     antes = [arquivo[:2] for arquivo in _arquivos_landing(catalogo)]
     spark.sql(f"CREATE TABLE {catalogo}.bronze.sobra_de_execucao_anterior (id INT)")

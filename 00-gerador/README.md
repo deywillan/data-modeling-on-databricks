@@ -74,6 +74,8 @@ Depois disso, o job `avancar_tempo` gera os lotes dos dias seguintes ao relógio
 - O avanço só cria arquivos novos; nenhum arquivo já entregue muda.
 - Os dados são **determinísticos**: a mesma escala, a mesma versão do roteiro e a mesma data produzem sempre os mesmos bytes. Avançar 3 dias de uma vez produz o mesmo que avançar 1 dia três vezes, e os seus números batem com os do artigo.
 - Rodar o `<NN>_setup` de novo, sem `reset`, não altera nada e só informa a data do relógio. Com `reset=true`, o catálogo do artigo é apagado e recriado do zero.
+- Se o roteiro mudou de versão (ou a escala é outra) desde a carga inicial do catálogo, o `<NN>_setup` sem `reset` e o `avancar_tempo` param com um erro que manda recomeçar com `reset=true`: dados de gerações diferentes não se misturam na mesma landing.
+- Se um job cair no meio (rede, cota, cancelamento), basta rodá-lo de novo: o relógio só avança no fim, um arquivo que já está na landing com os mesmos bytes conta como entregue (bytes diferentes continuam sendo erro) e o gabarito do intervalo não duplica.
 
 ## Roteiro
 
@@ -135,7 +137,7 @@ A regra da série é que a Bronze **preserva** esses defeitos (no máximo os mar
 Algumas fatias recebem o schema `gabarito`, com tabelas Delta que mostram a "verdade" por trás da landing:
 
 - as entidades do mundo verdadeiro (`pessoas`, `empresas_pj`, `veiculos`, `participacoes`...);
-- `mapa_chaves`: a chave de cada entidade verdadeira em cada sistema;
+- `mapa_chaves`: a chave de cada entidade verdadeira em cada sistema, inclusive as chaves das cópias duplicadas de pessoas (o defeito `pessoa_duplicada_no_sistema` as identifica);
 - `defeitos`: cada defeito injetado, com sistema, entidade, chave no sistema, valor original, valor sujo e o arquivo em que chegou.
 
 O gabarito serve para conferir uma solução, por exemplo, quantos clientes duplicados a sua integração encontrou. Ele nunca é gravado na landing, para que não seja ingerido por engano, e os pipelines não o leem.

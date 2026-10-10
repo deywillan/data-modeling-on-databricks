@@ -10,6 +10,7 @@ separador (ex.: `ibge/municipios/2025-12-31/municipios_20251231_0001.csv`).
 
 import shutil
 from collections.abc import Iterable, Sequence
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class ArquivoJaExiste(FileExistsError):
-    """A landing nunca sobrescreve: o arquivo já foi entregue antes."""
+    """A landing nunca sobrescreve: já existe um arquivo com esse caminho e outro conteúdo."""
 
 
 class Destino(Protocol):
@@ -30,7 +31,9 @@ class Destino(Protocol):
         """Cria os schemas (e o Volume `landing`) que faltarem. Com `reset`, apaga tudo antes."""
 
     def gravar_arquivos(self, arquivos: Iterable[Arquivo]) -> None:
-        """Grava arquivos novos na landing. Levanta `ArquivoJaExiste` se algum já existir."""
+        """Grava arquivos novos na landing, sem nunca sobrescrever. Um arquivo que já existe
+        com exatamente os mesmos bytes conta como gravado (é o que torna segura a nova tentativa
+        de uma chamada que caiu no meio); com bytes diferentes, levanta `ArquivoJaExiste`."""
 
     def listar(self, prefixo: str) -> list[str]:
         """Caminhos (relativos à landing, ordenados) dos arquivos sob o prefixo; vazio se não houver."""
@@ -41,6 +44,10 @@ class Destino(Protocol):
     def gravar_gabarito(self, tabela: str, df: "DataFrame", acrescentar: bool = False) -> None:
         """Grava uma tabela no schema `gabarito`, substituindo-a (padrão) ou, com
         `acrescentar`, somando as linhas às que já existem."""
+
+    def apagar_do_gabarito(self, tabela: str, coluna: str, a_partir_de: date) -> None:
+        """Remove da tabela do gabarito as linhas cuja `coluna` (uma data) é `a_partir_de` ou
+        posterior; linhas sem data ficam. Não faz nada se a tabela ainda não existe."""
 
 
 class DestinoLocal:
@@ -70,7 +77,10 @@ class DestinoLocal:
                 with alvo.open("xb") as saida:
                     saida.write(arquivo.conteudo)
             except FileExistsError:
-                raise ArquivoJaExiste(f"A landing nunca sobrescreve: {arquivo.caminho} já existe.") from None
+                if alvo.read_bytes() != arquivo.conteudo:
+                    raise ArquivoJaExiste(
+                        f"A landing nunca sobrescreve: {arquivo.caminho} já existe com outro conteúdo."
+                    ) from None
 
     def listar(self, prefixo: str) -> list[str]:
         base = self._caminho(prefixo)
@@ -90,6 +100,20 @@ class DestinoLocal:
         pasta.mkdir(parents=True, exist_ok=True)
         parte = len(list(pasta.glob("parte-*.parquet")))
         pq.write_table(df.toArrow(), pasta / f"parte-{parte:04d}.parquet")
+
+    def apagar_do_gabarito(self, tabela: str, coluna: str, a_partir_de: date) -> None:
+        import pyarrow as pa
+        import pyarrow.compute as pc
+        import pyarrow.parquet as pq
+
+        # Cada parte é regravada no lugar (nunca apagada): `gravar_gabarito` numera a próxima
+        # parte pela contagem, então remover uma do meio faria a seguinte sobrescrever outra.
+        for caminho in sorted((self.raiz / "gabarito" / tabela).glob("parte-*.parquet")):
+            dados = pq.read_table(caminho)
+            limite = pa.scalar(a_partir_de, dados.schema.field(coluna).type)
+            manter = pc.or_(pc.is_null(dados[coluna]), pc.less(dados[coluna], limite))
+            if not pc.all(manter).as_py():
+                pq.write_table(dados.filter(manter), caminho)
 
     def _caminho(self, relativo: str) -> Path:
         alvo = (self.volume / relativo).resolve()
