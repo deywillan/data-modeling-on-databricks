@@ -36,11 +36,12 @@ def _confere_fatia_inteira(artigo, gerada):
     destino = gerada.final
 
     assert gerada.resultados[-1].gerou
-    assert (destino.raiz / "gabarito").is_dir() == (artigo in FATIAS_COM_GABARITO)
-    assert any((destino.raiz / "gabarito").glob("*/*.parquet")), "gabarito declarado e vazio"
-    assert not any("gabarito" in p.as_posix() for p in destino.volume.rglob("*"))
-    raizes = {p.name for p in destino.volume.iterdir()}
-    assert raizes == set(carregar_roteiro().fatia(artigo).sistemas) | {"_controle"}
+    assert destino.pasta_gabarito().is_dir() == (artigo in FATIAS_COM_GABARITO)
+    assert any(destino.pasta_gabarito().glob("*/*.parquet")), "gabarito declarado e vazio"
+    assert not any("gabarito" in c for c in destino.listar("")), "o gabarito não vai para a landing"
+    schemas = {p.name for p in destino.pasta("bronze").iterdir()}
+    assert schemas == set(carregar_roteiro().fatia(artigo).sistemas) | {"_controle"}
+    assert not any(destino.pasta("gold").iterdir()), "o Gold nasce vazio"
 
 
 # Fatias inteiras dos artigos que recebem os legados: a 05 (a 06 tem os mesmos sistemas,
@@ -56,6 +57,19 @@ def test_fatia_05_com_os_legados_gera_com_gabarito_fora_da_landing(fatia_05):
 @pytest.mark.lento
 def test_fatia_10_com_todos_os_sistemas_gera_com_gabarito_fora_da_landing(fatia_10):
     _confere_fatia_inteira("10-data-marts", fatia_10)
+
+
+def test_o_roteiro_nao_guarda_o_mapa_defeito_artigo_nem_o_nome_do_catalogo(destino, tmp_path):
+    """O mapa defeito → artigo fica só no Estudo de Caso (decisão de 10/10/2026), e o nome do
+    catálogo sai de `catalogos.nome_catalogo`, não do roteiro."""
+    dados = _roteiro_padrao()
+    assert not any("artigos" in defeito for defeito in dados["defeitos"].values())
+    assert not any("catalogo" in fatia for fatia in dados["fatias"].values())
+    dados["defeitos"]["cdc_duplicado"]["artigos"] = [2]
+    caminho = _gravar(dados, tmp_path / "roteiro_com_mapa.yaml")
+
+    with pytest.raises(RoteiroInvalido, match="artigos"):
+        gerar_fatia("01-bronze", destino, roteiro=caminho)
 
 
 def test_artigo_sem_fatia_falha_listando_as_opcoes(destino):

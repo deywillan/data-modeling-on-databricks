@@ -30,12 +30,7 @@ ENTIDADES = {
 
 
 def _arquivos(destino: DestinoLocal) -> dict[str, bytes]:
-    return {
-        p.relative_to(destino.volume).as_posix(): p.read_bytes()
-        for sistema in ENTIDADES
-        for p in sorted((destino.volume / sistema).rglob("*"))
-        if p.is_file()
-    }
+    return {c: destino.ler(c) for sistema in ENTIDADES for c in destino.listar(sistema)}
 
 
 def _fotos(arquivos: dict[str, bytes], sistema: str) -> dict[date, dict[str, dict[str, dict]]]:
@@ -234,7 +229,6 @@ def test_defeitos_do_solticket_aparecem_na_taxa_do_roteiro_e_estao_registrados(g
     for r in gabarito["defeitos"]:
         if r["sistema"] != "solticket" or r["granularidade"] != "linha":
             continue
-        assert list(r["artigos"]) == defeitos[r["tipo"]].artigos
         assert r["data_entrega"] in fotos
         if r["tipo"] == "pessoa_duplicada_no_sistema":  # chave da cópia; a original em valor_original
             assert r["chave_sistema"] == r["valor_sujo"]

@@ -39,15 +39,15 @@ if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame, SparkSession
 
 ANOTACAO = (
-    "struct<tipo:string,artigos:array<int>,coluna:string,chave_sistema:string,"
+    "struct<tipo:string,coluna:string,chave_sistema:string,"
     "tabela_verdadeira:string,id_verdadeiro:bigint,valor_original:string,valor_sujo:string>"
 )
 COLUNAS_DEFEITOS = (
-    "sistema", "entidade", "granularidade", "tipo", "artigos", "coluna", "chave_sistema",
+    "sistema", "entidade", "granularidade", "tipo", "coluna", "chave_sistema",
     "tabela_verdadeira", "id_verdadeiro", "valor_original", "valor_sujo", "data_entrega", "seq", "arquivo",
 )
 ESQUEMA = (
-    "sistema string, entidade string, granularidade string, tipo string, artigos array<int>, "
+    "sistema string, entidade string, granularidade string, tipo string, "
     "coluna string, chave_sistema string, tabela_verdadeira string, id_verdadeiro bigint, "
     "valor_original string, valor_sujo string, data_entrega date, seq bigint, arquivo string"
 )
@@ -70,16 +70,24 @@ class Alvo:
 
 
 class Defeitos:
-    """Defeitos de um sistema, com as taxas do roteiro."""
+    """Defeitos de um sistema, com as taxas do roteiro.
 
-    def __init__(self, roteiro: Roteiro, sistema: str):
+    `injetar=False` desliga todos: o sistema entrega os arquivos limpos. É o caso das fatias sem
+    gabarito (`Contexto.defeitos`), porque os defeitos só valem onde há `gabarito.defeitos` para
+    conferir a correção."""
+
+    def __init__(self, roteiro: Roteiro, sistema: str, injetar: bool = True):
         self.roteiro = roteiro
         self.sistema = sistema
+        self.injetar = injetar
 
     # -- consulta ao roteiro ----------------------------------------------------------------
 
     def taxa(self, tipo: str) -> "float | str | None":
-        """Taxa do tipo para o sistema (fração, `arquivo`, `coluna`) ou `None` se não tem."""
+        """Taxa do tipo para o sistema (fração, `arquivo`, `coluna`) ou `None` se não tem
+        (ou se a fatia não injeta defeitos)."""
+        if not self.injetar:
+            return None
         return self.roteiro.defeitos[tipo].taxas.get(self.sistema)
 
     def folga_dias(self) -> int:
@@ -283,7 +291,7 @@ class Defeitos:
             raise ValueError("Informe o arquivo ou a coluna atingidos pelo defeito.")
         granularidade = "coluna" if coluna is not None else "arquivo"
         return (
-            self.sistema, entidade, granularidade, tipo, list(self.roteiro.defeitos[tipo].artigos), coluna, None,
+            self.sistema, entidade, granularidade, tipo, coluna, None,
             None, None, valor_original, valor_sujo, data_entrega, None, arquivo,
         )
 
@@ -316,11 +324,9 @@ class Defeitos:
     def _anotacao(self, tipo, alvo: Alvo, coluna: str | None, original: "Column", sujo: "Column") -> "Column":
         from pyspark.sql import functions as F
 
-        artigos = F.array(*[F.lit(a) for a in self.roteiro.defeitos[tipo].artigos]).cast("array<int>")
         id_verdadeiro = F.col(alvo.id_verdadeiro) if alvo.id_verdadeiro else F.lit(None)
         return F.struct(
             F.lit(tipo).alias("tipo"),
-            artigos.alias("artigos"),
             F.lit(coluna).cast("string").alias("coluna"),
             self._chave_texto(alvo).alias("chave_sistema"),
             F.lit(alvo.tabela_verdadeira).cast("string").alias("tabela_verdadeira"),
@@ -410,7 +416,7 @@ def registros(linhas, sistema: str, entidade_coluna: str = "entidade", data_colu
     for lista, entidade, data_lote, seq in zip(anotacoes, entidades, datas, seqs):
         for a in lista or ():
             saida.append((
-                sistema, entidade, "linha", a["tipo"], a["artigos"], a["coluna"], a["chave_sistema"],
+                sistema, entidade, "linha", a["tipo"], a["coluna"], a["chave_sistema"],
                 a["tabela_verdadeira"], a["id_verdadeiro"], a["valor_original"], a["valor_sujo"],
                 date.fromisoformat(data_lote) if isinstance(data_lote, str) else data_lote, seq, None,
             ))

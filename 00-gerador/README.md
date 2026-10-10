@@ -8,19 +8,19 @@ Você não precisa rodar nada desta pasta diretamente. O job `<NN>_setup` de cad
 
 ```
 roteiro.yaml ──► mundo verdadeiro ──► projeção de cada sistema ──► arquivos na landing
-                 (pessoas, empresas,   (chave, formato, padrão       (Volume do catálogo
-                  veículos, rotas...)   de entrega e defeitos)        do artigo)
+                 (pessoas, empresas,   (chave, formato, padrão       (Volumes do catálogo
+                  veículos, rotas...)   de entrega e defeitos)        Bronze do artigo)
 ```
 
 1. **Mundo verdadeiro.** Primeiro o gerador cria, com o [dbldatagen](https://github.com/databrickslabs/dbldatagen) e o Faker em `pt_BR`, as entidades "reais" do grupo: pessoas, empresas clientes, veículos, rotas, bases, lojas, colaboradores e municípios do IBGE. Também decide quem é cliente de quem: uma parte das pessoas é cliente de mais de uma empresa do grupo, e os ônibus e caminhões que a concessionária vende à própria holding passam a fazer parte da frota.
 2. **Projeção por sistema.** Cada sistema de origem enxerga só a parte do mundo que lhe interessa e a registra do seu jeito: com chave própria, grafia própria (o mesmo cliente pode aparecer em maiúsculas num sistema e com o CPF sem máscara em outro), o seu padrão de entrega e os seus defeitos.
-3. **Landing.** O resultado é gravado **só como arquivos** no Volume `landing` do catálogo do artigo. O gerador nunca escreve nos schemas `bronze`, `silver` e `gold`: quem os popula é o pipeline do artigo, lendo a landing como numa ingestão real.
+3. **Landing.** O resultado é gravado **só como arquivos** no Volume `landing` do schema de cada sistema, no catálogo Bronze do artigo. O gerador nunca cria tabelas nos catálogos Bronze, Silver e Gold (a única exceção é o `gabarito`, no Silver, nas fatias que o têm): quem os popula é o pipeline do artigo, lendo a landing como numa ingestão real.
 
 O mundo verdadeiro é sempre gerado inteiro, em qualquer artigo. Por isso, o mesmo cliente tem os mesmos dados em todos os artigos; muda só quais sistemas vão para a landing.
 
 ## Sistemas de origem
 
-| Sistema | Empresa | Entrega | Formato | Pasta na landing |
+| Sistema | Empresa | Entrega | Formato | Entidades (pastas do Volume `landing`) |
 |---|---|---|---|---|
 | *Embarque* | ModelBricks Viação (guichê e site) | CDC: uma linha por operação `I`/`U`/`D`, com `seq` e `ts_operacao` | JSON lines | `embarque/clientes`, `tarifas`, `passagens` |
 | *PassagemHub* | marketplace parceiro da Viação | API paginada: eventos de venda, cancelamento e remarcação | JSON aninhado (uma página por arquivo) | `passagemhub/eventos_venda` |
@@ -34,17 +34,25 @@ O mundo verdadeiro é sempre gerado inteiro, em qualquer artigo. Por isso, o mes
 
 A docstring de cada módulo em [`src/modelbricks_gerador/sistemas/`](src/modelbricks_gerador/sistemas/) descreve as entidades, as colunas e as regras de cada sistema.
 
-### Organização da landing
+### Organização dos catálogos
+
+Cada artigo tem três catálogos, um por camada, com o ambiente do target do bundle no fim do nome (`dev` gera `_dev`, `prod` gera `_prd`). O ambiente é a variável `ambiente` do `databricks.yml`.
 
 ```
-/Volumes/<catálogo>/landing/landing/
-├── <sistema>/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_<NNNN>.<ext>
-└── _controle/relogio/<AAAA-MM-DD>.json
+a03_bronze_dev                                  Bronze do artigo 03 no target dev
+├── <sistema>                                   um schema por sistema da fatia (o IBGE também conta)
+│   └── landing (Volume)                        /Volumes/a03_bronze_dev/<sistema>/landing/
+│       └── <entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_<NNNN>.<ext>
+└── _controle
+    └── relogio (Volume)                        /Volumes/a03_bronze_dev/_controle/relogio/<AAAA-MM-DD>.json
+a03_silver_dev                                  nasce vazio; só tem o schema gabarito nas fatias que o têm
+a03_gold_dev                                    nasce vazio
 ```
 
 - A data na pasta é a **data simulada** em que o lote chegou. Assim você vê o que chegou em cada dia.
 - Nenhum arquivo é sobrescrito: cada lote é um arquivo novo, e o Auto Loader trata cada um como novo.
-- A pasta `_controle/` guarda o relógio (abaixo) e não é dado de sistema. Os pipelines leem só as pastas dos sistemas.
+- O schema `_controle` guarda o relógio (abaixo) e não é dado de sistema. Os pipelines leem só os schemas dos sistemas.
+- O nome dos catálogos sai de uma função só, `catalogos.nome_catalogo(artigo, camada, ambiente)`, que valida os três.
 
 ## Fatias
 
@@ -53,27 +61,25 @@ Cada artigo usa só os sistemas de que precisa. Essa escolha é a **fatia** do a
 ```yaml
 fatias:
   01-bronze:
-    catalogo: medalhao_01_bronze
     sistemas: [embarque, patio, passagemhub, rastro, ibge]
     gabarito: false
     janela_telemetria_dias: 90
 ```
 
-- `catalogo`: o catálogo do Unity Catalog do artigo. Cada artigo tem o seu, com os schemas `landing` (com o Volume), `bronze`, `silver`, `gold` e, quando a fatia pede, `gabarito`. Por isso os artigos são independentes: rodar um não exige rodar outro.
 - `sistemas`: os sistemas que vão para a landing. Os demais não aparecem.
-- `gabarito`: se o catálogo recebe o schema `gabarito` (veja abaixo).
+- `gabarito`: se o catálogo Silver do artigo recebe o schema `gabarito` (veja abaixo). Os catálogos do artigo não saem do roteiro, e sim do número do artigo e do ambiente; cada artigo tem os seus, então rodar um não exige rodar outro.
 - `janela_telemetria_dias`: quantos dias de telemetria do *Rastro* entram na carga inicial. A telemetria é o maior volume do grupo, então a carga inicial traz só os últimos dias, seja qual for a escala.
 
 ## Relógio simulado
 
-A história do grupo começa em `datas.inicio` e a carga inicial vai até `datas.carga_inicial` (as duas no roteiro). O `<NN>_setup` grava todos os lotes desse período de uma vez e acerta o relógio do catálogo na data da carga inicial.
+A história do grupo começa em `datas.inicio` e a carga inicial vai até `datas.carga_inicial` (as duas no roteiro). O `<NN>_setup` grava todos os lotes desse período de uma vez e acerta o relógio do artigo na data da carga inicial.
 
 Depois disso, o job `avancar_tempo` gera os lotes dos dias seguintes ao relógio, só para os sistemas da fatia, e avança o relógio. O ciclo do leitor é **avançar o tempo → rodar o pipeline → observar o que mudou**.
 
-- O relógio fica em `_controle/relogio/`: cada avanço grava um arquivo novo, e o relógio atual é o de maior data.
+- O relógio fica no Volume `relogio` do schema `_controle` do catálogo Bronze: cada avanço grava um arquivo novo, e o relógio atual é o de maior data.
 - O avanço só cria arquivos novos; nenhum arquivo já entregue muda.
 - Os dados são **determinísticos**: a mesma escala, a mesma versão do roteiro e a mesma data produzem sempre os mesmos bytes. Avançar 3 dias de uma vez produz o mesmo que avançar 1 dia três vezes, e os seus números batem com os do artigo.
-- Rodar o `<NN>_setup` de novo, sem `reset`, não altera nada e só informa a data do relógio. Com `reset=true`, o catálogo do artigo é apagado e recriado do zero.
+- Rodar o `<NN>_setup` de novo, sem `reset`, não altera nada e só informa a data do relógio. Com `reset=true`, os três catálogos do artigo são apagados e recriados do zero.
 - Se o roteiro mudou de versão (ou a escala é outra) desde a carga inicial do catálogo, o `<NN>_setup` sem `reset` e o `avancar_tempo` param com um erro que manda recomeçar com `reset=true`: dados de gerações diferentes não se misturam na mesma landing.
 - Se um job cair no meio (rede, cota, cancelamento), basta rodá-lo de novo: o relógio só avança no fim, um arquivo que já está na landing com os mesmos bytes conta como entregue (bytes diferentes continuam sendo erro) e o gabarito do intervalo não duplica.
 
@@ -101,7 +107,7 @@ O parâmetro `escala` do `<NN>_setup` multiplica linearmente os volumes do rotei
 
 Nas populações distribuídas entre empresas (rotas, bases, lojas e colaboradores), o roteiro garante ao menos uma instância por empresa (`mundo.minimo_por_empresa`), de modo que mesmo a escala `0.01` entrega todas as divisões com dados (a Viação, por exemplo, sempre tem rota e passagens).
 
-Na escala 1, no Free Edition, o `<NN>_setup` leva de poucos minutos (cerca de 4 minutos para o artigo 01 e para o 05) a cerca de 6 minutos (artigo 10, com todos os sistemas e cerca de 2 GB na landing). O job imprime, por sistema, os arquivos, o tamanho e o tempo de geração e de gravação. Para conferir o que o setup deixou no catálogo, use `scripts/conferir_catalogo.py <catalogo>`: ele resume a landing por pasta (`--arquivos` lista cada arquivo).
+Na escala 1, no Free Edition, o `<NN>_setup` leva de poucos minutos (cerca de 4 minutos para o artigo 01 e para o 05) a cerca de 6 minutos (artigo 10, com todos os sistemas e cerca de 2 GB na landing). O job imprime, por sistema, os arquivos, o tamanho e o tempo de geração e de gravação. Para conferir o que o setup deixou no catálogo, use `scripts/conferir_catalogo.py <artigo> <ambiente>` (por exemplo, `01-bronze dev`): ele resume os catálogos, os schemas por sistema e a landing de cada sistema (`--arquivos` lista cada arquivo).
 
 ### Eventos com data
 
@@ -132,15 +138,17 @@ Dados de empresas reais têm defeitos, e os artigos precisam deles para mostrar 
 
 A regra da série é que a Bronze **preserva** esses defeitos (no máximo os marca) e a correção acontece na Silver. Por isso eles estão nos arquivos desde a carga inicial.
 
+Os defeitos só são injetados nas fatias **com gabarito** (`gabarito: true` no roteiro), porque só nelas há a tabela `gabarito.defeitos` para conferir a correção. Nas fatias sem gabarito os arquivos saem limpos: o mesmo cliente aparece, na fatia sem gabarito, com o valor original, e, na fatia com gabarito, com o defeito registrado. A regra é a própria flag `gabarito` da fatia, aplicada em um só lugar (`Contexto.defeitos`).
+
 ## Gabarito
 
-Algumas fatias recebem o schema `gabarito`, com tabelas Delta que mostram a "verdade" por trás da landing:
+Algumas fatias recebem o schema `gabarito` no catálogo Silver do artigo (`a03_silver_dev.gabarito`), com tabelas Delta que mostram a "verdade" por trás da landing:
 
 - as entidades do mundo verdadeiro (`pessoas`, `empresas_pj`, `veiculos`, `participacoes`...);
 - `mapa_chaves`: a chave de cada entidade verdadeira em cada sistema, inclusive as chaves das cópias duplicadas de pessoas (o defeito `pessoa_duplicada_no_sistema` as identifica);
 - `defeitos`: cada defeito injetado, com sistema, entidade, chave no sistema, valor original, valor sujo e o arquivo em que chegou.
 
-O gabarito serve para conferir uma solução, por exemplo, quantos clientes duplicados a sua integração encontrou. Ele nunca é gravado na landing, para que não seja ingerido por engano, e os pipelines não o leem.
+O gabarito serve para conferir uma solução, por exemplo, quantos clientes duplicados a sua integração encontrou. Ele nunca é gravado na landing (fica no Silver, fora dos Volumes dos sistemas), para que não seja ingerido por engano, e os pipelines não o leem.
 
 ## Para quem quer mexer no gerador
 
@@ -156,6 +164,7 @@ O pacote é Python 3.12 e usa o [`uv`](https://docs.astral.sh/uv/). O `databrick
 | `cdc.py`, `incremental.py`, `snapshot.py` | os padrões de entrega |
 | `defeitos.py` | o catálogo de defeitos |
 | `escritor.py` | a serialização dos arquivos (JSON, CSV, Parquet) |
+| `catalogos.py` | o nome dos catálogos (artigo + camada + ambiente), validado |
 | `destino.py`, `destino_uc.py` | onde gravar: diretório local (testes) ou Unity Catalog (jobs) |
 | `relogio.py` | o relógio simulado |
 

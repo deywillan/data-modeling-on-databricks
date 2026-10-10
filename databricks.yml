@@ -13,10 +13,11 @@ bundle:
 include:
   - "*/resources/*.yml"
 
+# Cada artigo tem três catálogos, um por camada: aNN_bronze_<ambiente>, aNN_silver_<ambiente> e
+# aNN_gold_<ambiente>. O ambiente vem do target (abaixo): dev gera _dev e prod gera _prd.
 variables:
-  sufixo_catalogo:
-    description: Sufixo acrescentado ao nome do catálogo de cada artigo. Deixe vazio; serve só para testes.
-    default: ""
+  ambiente:
+    description: Ambiente no fim do nome dos catálogos. Cada target define o seu valor.
 
 artifacts:
   gerador:
@@ -28,3 +29,14 @@ targets:
   dev:
     mode: development
     default: true
+    variables:
+      ambiente: dev
+
+  prod:
+    mode: production
+    variables:
+      ambiente: prd
+    # Sem host fixo: use o perfil da sua CLI. O modo production pede uma pasta de deploy explícita
+    # (root_path), aqui a pasta do próprio usuário.
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

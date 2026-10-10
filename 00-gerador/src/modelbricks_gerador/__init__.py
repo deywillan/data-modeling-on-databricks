@@ -5,6 +5,7 @@ Unity Catalog nos jobs). O resto do pacote é interno.
 """
 
 from .api import Resultado, avancar_tempo, gerar_fatia
+from .catalogos import catalogos_do_artigo, nome_catalogo
 from .destino import ArquivoJaExiste, Destino, DestinoLocal
 from .destino_uc import DestinoUC
 from .relogio import RelogioIncompativel
@@ -20,5 +21,7 @@ __all__ = [
     "RoteiroInvalido",
     "avancar_tempo",
     "carregar_roteiro",
+    "catalogos_do_artigo",
     "gerar_fatia",
+    "nome_catalogo",
 ]

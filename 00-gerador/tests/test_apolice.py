@@ -247,7 +247,6 @@ def test_valor_monetario_como_texto_registrado_por_coluna_no_gabarito(gerado):
     assert len(registros) == len(por_arquivo) * len(MONETARIAS)
     for r in registros:
         assert r["granularidade"] == "coluna" and r["entidade"] == "apolices"
-        assert list(r["artigos"]) == roteiro.defeitos["valor_monetario_texto"].artigos
         assert r["chave_sistema"] is None and r["id_verdadeiro"] is None and r["seq"] is None
         assert r["data_entrega"] == date.fromisoformat(r["arquivo"].split("/")[2])
         assert r["valor_sujo"] in {l[r["coluna"]] for l in por_arquivo[r["arquivo"]]}

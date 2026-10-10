@@ -38,6 +38,7 @@ from modelbricks_gerador import DestinoLocal, Resultado, avancar_tempo, carregar
 RAIZ_GERADOR = Path(__file__).resolve().parents[1]
 CACHE = RAIZ_GERADOR / ".cache-testes"
 CARGA_INICIAL = date(2025, 12, 31)
+AMBIENTE = "t1"  # ambiente dos catálogos do destino local (nome das pastas); não aparece nos dados
 # Com várias gerações em paralelo na mesma sessão, o servidor Connect às vezes invalida o cursor
 # de um resultado grande (INVALID_CURSOR.POSITION_NOT_AVAILABLE); a geração é repetida uma vez.
 TENTATIVAS = 2
@@ -69,6 +70,8 @@ FATIAS_DE_TESTE = {
     # arquivo de municípios), então não entram na comparação da geração em partes.
     "94-partes": {"sistemas": ["embarque", "nucleo", "rotacerta", "apolice", "passagemhub"]},
     "98-legados": {"sistemas": ["solticket", "solfin"]},
+    # Mesmos sistemas da 90 (mais o Pátio), mas sem gabarito: nenhum defeito é injetado.
+    "95-limpa": {"sistemas": [*SISTEMAS, "patio"], "janela_telemetria_dias": 90, "gabarito": False},
 }
 
 
@@ -89,10 +92,7 @@ def dados_do_roteiro(variante: str) -> dict:
     elif variante != "teste":
         raise ValueError(f"variante de roteiro desconhecida: {variante}")
     for artigo, fatia in FATIAS_DE_TESTE.items():
-        numero, tema = artigo.split("-", 1)
-        dados["fatias"][artigo] = {
-            "catalogo": f"medalhao_{numero}_{tema.replace('-', '_')}", "gabarito": True, **fatia,
-        }
+        dados["fatias"][artigo] = {"gabarito": True, **fatia}
     return dados
 
 
@@ -123,6 +123,9 @@ LEGADOS = Geracao(  # até a segunda-feira 05/01/2026, com o Embarque sujo (test
     "legados", "91-legados", 0.1, "embarque_sujo", (("gerar", date(2026, 1, 5)),),
 )
 PATIO = Geracao("patio", "92-patio", 0.2, "teste", (("gerar", date(2026, 1, 3)),))
+LIMPA = Geracao(  # a carga inicial da PRINCIPAL numa fatia sem gabarito (e, portanto, sem defeitos)
+    "limpa", "95-limpa", 0.05, "teste", (("gerar", CARGA_INICIAL),),
+)
 
 # Gerações dos testes marcados como `lento`.
 PRINCIPAL_EM_PARTES = Geracao(  # mesma história da PRINCIPAL, cortada em outros pontos
@@ -204,8 +207,7 @@ def obter(geracao: Geracao, pasta_temporaria: Path, obter_spark, usar_cache: boo
 
 def _executar(geracao: Geracao, trabalho: Path, spark) -> None:
     caminho_roteiro = trabalho / "roteiro.yaml"
-    catalogo = carregar_roteiro(caminho_roteiro).fatia(geracao.artigo).catalogo
-    destino = DestinoLocal(trabalho / "destino" / catalogo)
+    destino = DestinoLocal(trabalho / "destino", geracao.artigo, AMBIENTE)
     resultados = []
     for indice, (passo, valor) in enumerate(geracao.passos):
         if passo == "gerar":
@@ -214,7 +216,7 @@ def _executar(geracao: Geracao, trabalho: Path, spark) -> None:
         else:
             r = avancar_tempo(geracao.artigo, destino, valor, spark=spark, roteiro=caminho_roteiro)
         resultados.append({**asdict(r), "data_relogio": r.data_relogio.isoformat()})
-        shutil.copytree(destino.raiz, trabalho / f"etapa-{indice}" / catalogo)
+        shutil.copytree(destino.raiz, trabalho / f"etapa-{indice}")
     shutil.rmtree(trabalho / "destino")
     # Gravado por último: a presença dele marca a geração como completa no cache.
     (trabalho / "resultados.json").write_text(json.dumps(resultados, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -222,11 +224,10 @@ def _executar(geracao: Geracao, trabalho: Path, spark) -> None:
 
 def _ler(pasta: Path, geracao: Geracao) -> Gerada:
     roteiro = pasta / "roteiro.yaml"
-    catalogo = carregar_roteiro(roteiro).fatia(geracao.artigo).catalogo
     resultados = json.loads((pasta / "resultados.json").read_text(encoding="utf-8"))
     return Gerada(
         roteiro=roteiro,
-        etapas=tuple(DestinoLocal(pasta / f"etapa-{i}" / catalogo) for i in range(len(geracao.passos))),
+        etapas=tuple(DestinoLocal(pasta / f"etapa-{i}", geracao.artigo, AMBIENTE) for i in range(len(geracao.passos))),
         resultados=tuple(Resultado(**{**r, "data_relogio": date.fromisoformat(r["data_relogio"])}) for r in resultados),
     )
 
@@ -257,15 +258,25 @@ def roteiro_so_ibge():
 
 
 def arquivos(destino: DestinoLocal, sistema: str) -> dict[str, bytes]:
-    """Arquivos da landing de um sistema: caminho relativo à landing → conteúdo."""
-    pasta = destino.volume / sistema
-    return {p.relative_to(destino.volume).as_posix(): p.read_bytes() for p in sorted(pasta.rglob("*")) if p.is_file()}
+    """Arquivos da landing de um sistema: caminho do contrato (`<sistema>/<entidade>/...`) → conteúdo."""
+    return {c: destino.ler(c) for c in destino.listar(sistema)}
+
+
+def conteudo(destino: DestinoLocal) -> dict[str, bytes]:
+    """Tudo o que o destino guarda nos Volumes do Bronze (landing de cada sistema e o relógio):
+    caminho do contrato → conteúdo."""
+    return {c: destino.ler(c) for c in destino.listar("")}
+
+
+def arvore(destino: DestinoLocal) -> dict[str, bytes]:
+    """Todos os arquivos sob a raiz do destino (landing, relógio e gabarito): caminho relativo → conteúdo."""
+    return {p.relative_to(destino.raiz).as_posix(): p.read_bytes() for p in destino.raiz.rglob("*") if p.is_file()}
 
 
 def gabarito(destino: DestinoLocal, sistema: str | None = None) -> dict[str, list[dict]]:
     """Tabelas do gabarito (todas as partes de cada uma). Com `sistema`, `mapa_chaves` e
     `defeitos` ficam só com as linhas dele (a fatia de teste tem vários sistemas)."""
-    pasta = destino.raiz / "gabarito"
+    pasta = destino.pasta_gabarito()
     tabelas = {
         p.name: [r for parte in sorted(p.glob("*.parquet")) for r in pq.read_table(parte).to_pylist()]
         for p in sorted(pasta.iterdir()) if p.is_dir()

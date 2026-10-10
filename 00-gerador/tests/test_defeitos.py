@@ -24,9 +24,11 @@ TAXAS_DE_TESTE = geracoes.TAXAS_EMBARQUE
 def _operacoes(destino: DestinoLocal) -> list[dict]:
     """Todas as linhas entregues pelo Embarque (reentregas inclusive), em ordem de `seq`."""
     operacoes = []
-    for caminho in sorted((destino.volume / "embarque").rglob("*.json")):
-        _, entidade, data_lote, _ = caminho.relative_to(destino.volume).as_posix().split("/")
-        for linha in caminho.read_text(encoding="utf-8").splitlines():
+    for caminho in destino.listar("embarque"):
+        if not caminho.endswith(".json"):
+            continue
+        _, entidade, data_lote, _ = caminho.split("/")
+        for linha in destino.ler(caminho).decode("utf-8").splitlines():
             operacoes.append({**json.loads(linha), "_entidade": entidade, "_lote": date.fromisoformat(data_lote)})
     return sorted(operacoes, key=lambda o: (o["seq"], o["_lote"]))
 
@@ -142,12 +144,11 @@ def test_todo_defeito_observavel_na_landing_tem_registro_no_gabarito(gerado):
     _, operacoes, gabarito = gerado
     observado = _Observado(operacoes, gabarito)
     registrados = _registrados(gabarito, set(observado.clientes_originais), observado.mapa)
-    artigos = {tipo: d.artigos for tipo, d in carregar_roteiro().defeitos.items()}
 
     for tipo, (ocorrencias, _) in observado.por_tipo().items():
         assert ocorrencias == registrados[tipo], f"{tipo}: landing e gabarito divergem"
     for r in gabarito["defeitos"]:
-        assert list(r["artigos"]) == artigos[r["tipo"]]
+        assert "artigos" not in r, "o mapa defeito → artigo não vai para o gabarito público"
         assert r["data_entrega"] is not None
     assert max(r["data_entrega"] for r in gabarito["defeitos"]) > date(2025, 12, 31), (
         "os defeitos dos lotes depois da carga de referência também são registrados"

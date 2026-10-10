@@ -37,7 +37,7 @@ def test_gabarito_tem_as_tabelas_do_mundo_e_nada_dele_vai_para_a_landing(mundo, 
     destino, tabelas = mundo
 
     assert set(tabelas) == TABELAS | {"mapa_chaves", "defeitos"}
-    entregues = [p.relative_to(destino.volume).as_posix() for p in destino.volume.rglob("*") if p.is_file()]
+    entregues = destino.listar("")
     # A landing tem só pastas dos sistemas da fatia e o controle do relógio. Entidades de
     # sistema podem ter o nome de uma tabela do mundo (ex.: `patio/veiculos/`) e o Núcleo
     # entrega Parquet, mas nada do gabarito fica fora dessas pastas.

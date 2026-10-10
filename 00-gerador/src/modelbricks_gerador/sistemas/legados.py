@@ -19,7 +19,6 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from ..cdc import Mudancas
-from ..defeitos import Defeitos
 from ..expressoes import inteiro_e_fracao
 from ..mundo import linhas as linhas_na_escala
 from ..snapshot import datas_de_snapshot, entrega_snapshot, registrar_por_arquivo
@@ -49,7 +48,7 @@ def entregar(
         return Entrega(mapa_chaves=mapa_chaves())
     formato = contexto.roteiro.sistemas[sistema].formato
     entrega = entrega_snapshot(sistema, historicos(), datas, inicio, fim, formato)
-    entrega = registrar_por_arquivo(entrega, Defeitos(contexto.roteiro, sistema), DEFEITO_DE_ARQUIVO, contexto.spark)
+    entrega = registrar_por_arquivo(entrega, contexto.defeitos(sistema), DEFEITO_DE_ARQUIVO, contexto.spark)
     return replace(entrega, mapa_chaves=mapa_chaves())
 
 

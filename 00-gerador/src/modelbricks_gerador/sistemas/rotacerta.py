@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 from ..cdc import Mudancas, entrega_cdc
 from ..chaves import chave_do_sistema, mapa
-from ..defeitos import Alvo, Defeitos
+from ..defeitos import Alvo
 from ..expressoes import instante
 from .base import Contexto, Entrega, calendario, linhas_por_dia, materializar, volume_por_dia
 
@@ -60,7 +60,7 @@ class _Projecao:
         self.p = contexto.roteiro.parametros.rotacerta
         self.fim = fim
         self.empresa = contexto.roteiro.sistemas[SISTEMA].empresa
-        self.defeitos = Defeitos(contexto.roteiro, SISTEMA)
+        self.defeitos = contexto.defeitos(SISTEMA)
 
     def chave(self, entidade: str, coluna_id: str, digitos: int) -> str:
         return chave_do_sistema(self.roteiro.seed_base, SISTEMA, entidade, coluna_id, digitos)

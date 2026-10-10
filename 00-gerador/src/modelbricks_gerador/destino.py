@@ -1,34 +1,84 @@
 """Destino: onde o gerador guarda o que produziu.
 
 O destino não gera nem serializa nada: recebe bytes prontos do escritor único e os guarda
-no Volume `landing`, e recebe DataFrames do gabarito para gravar como tabelas. Há duas
-implementações: diretório local (testes) e Unity Catalog (jobs no workspace).
+nos Volumes do catálogo Bronze do artigo, e recebe DataFrames do gabarito para gravar como
+tabelas no catálogo Silver. Há duas implementações: diretório local (testes) e Unity Catalog
+(jobs no workspace). As duas seguem a mesma estrutura:
 
-Todos os caminhos de arquivo são relativos à raiz do Volume `landing`, com `/` como
-separador (ex.: `ibge/municipios/2025-12-31/municipios_20251231_0001.csv`).
+    aNN_bronze_<amb>/<sistema>/landing/<entidade>/<data>/<arquivo>   Volume `landing` de cada sistema
+    aNN_bronze_<amb>/_controle/relogio/<data>.json                  relógio simulado
+    aNN_silver_<amb>/gabarito/<tabela>                              só nas fatias com gabarito
+    aNN_gold_<amb>/                                                 nasce vazio
+
+Os caminhos de arquivo do contrato começam pelo sistema (ex.:
+`ibge/municipios/2025-12-31/municipios_20251231_0001.csv`) ou por `_controle/relogio/`, com `/`
+como separador; o destino os mapeia para o schema e o Volume certos (`localizar`).
 """
 
 import shutil
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from .catalogos import catalogos_do_artigo, validar_ambiente
 from .escritor import Arquivo
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
+
+SCHEMA_CONTROLE = "_controle"  # o Unity Catalog aceita o nome com o sublinhado (verificado no Free Edition)
+VOLUME_LANDING = "landing"  # Volume de cada schema de sistema
+VOLUME_RELOGIO = "relogio"  # Volume do schema de controle
+SCHEMA_GABARITO = "gabarito"  # no catálogo Silver
 
 
 class ArquivoJaExiste(FileExistsError):
     """A landing nunca sobrescreve: já existe um arquivo com esse caminho e outro conteúdo."""
 
 
+@dataclass(frozen=True)
+class Local:
+    """Onde um caminho do contrato fica: schema, Volume e o caminho dentro do Volume."""
+
+    schema: str
+    volume: str
+    resto: str
+
+
+def localizar(caminho: str) -> Local:
+    """Mapeia um caminho do contrato para schema, Volume e caminho no Volume.
+
+    `embarque/passagens/2025-12-31/x.csv` → schema `embarque`, Volume `landing`;
+    `_controle/relogio/2025-12-31.json` → schema `_controle`, Volume `relogio`."""
+    partes = [p for p in caminho.split("/") if p]
+    if not partes:
+        raise ValueError("Caminho vazio: o primeiro componente é o sistema (ou _controle).")
+    if partes[0] == SCHEMA_CONTROLE:
+        if len(partes) < 2:
+            raise ValueError(f"Caminho incompleto em {SCHEMA_CONTROLE}: {caminho}")
+        return Local(SCHEMA_CONTROLE, partes[1], "/".join(partes[2:]))
+    return Local(partes[0], VOLUME_LANDING, "/".join(partes[1:]))
+
+
+def caminho_do_contrato(local: Local) -> str:
+    """O inverso de `localizar`: o caminho do contrato de um arquivo em `local`."""
+    if local.schema == SCHEMA_CONTROLE:
+        return f"{SCHEMA_CONTROLE}/{local.volume}/{local.resto}"
+    return f"{local.schema}/{local.resto}"
+
+
 class Destino(Protocol):
     """Contrato que toda implementação de destino cumpre."""
 
-    def preparar(self, schemas: Sequence[str], reset: bool = False) -> None:
-        """Cria os schemas (e o Volume `landing`) que faltarem. Com `reset`, apaga tudo antes."""
+    artigo: str  # artigo a que o destino pertence (ex.: `03-3fn`)
+    ambiente: str  # ambiente dos catálogos (ex.: `dev`)
+
+    def preparar(self, sistemas: Sequence[str], gabarito: bool = False, reset: bool = False) -> None:
+        """Cria o que faltar: os três catálogos do artigo, um schema por sistema (com o Volume
+        `landing`), o schema de controle (com o Volume do relógio) e, com `gabarito`, o schema
+        `gabarito` no Silver. Com `reset`, apaga os três catálogos antes."""
 
     def gravar_arquivos(self, arquivos: Iterable[Arquivo]) -> None:
         """Grava arquivos novos na landing, sem nunca sobrescrever. Um arquivo que já existe
@@ -36,13 +86,14 @@ class Destino(Protocol):
         de uma chamada que caiu no meio); com bytes diferentes, levanta `ArquivoJaExiste`."""
 
     def listar(self, prefixo: str) -> list[str]:
-        """Caminhos (relativos à landing, ordenados) dos arquivos sob o prefixo; vazio se não houver."""
+        """Caminhos do contrato (ordenados) dos arquivos sob o prefixo (`""` lista tudo);
+        vazio se não houver."""
 
     def ler(self, caminho: str) -> bytes:
-        """Conteúdo de um arquivo da landing."""
+        """Conteúdo de um arquivo."""
 
     def gravar_gabarito(self, tabela: str, df: "DataFrame", acrescentar: bool = False) -> None:
-        """Grava uma tabela no schema `gabarito`, substituindo-a (padrão) ou, com
+        """Grava uma tabela no schema `gabarito` do Silver, substituindo-a (padrão) ou, com
         `acrescentar`, somando as linhas às que já existem."""
 
     def apagar_do_gabarito(self, tabela: str, coluna: str, a_partir_de: date) -> None:
@@ -53,24 +104,49 @@ class Destino(Protocol):
 class DestinoLocal:
     """Destino em diretório local, espelho do Unity Catalog para os testes.
 
-    Layout: `<raiz>/<schema>/` para cada schema; o Volume `landing` fica em
-    `<raiz>/landing/landing/` (como `/Volumes/<catálogo>/landing/landing/`) e cada tabela
-    do gabarito em `<raiz>/gabarito/<tabela>/parte-0000.parquet`.
+    Layout: `<raiz>/<catálogo>/<schema>/<volume>/...`, com os mesmos nomes do Unity Catalog
+    (veja o cabeçalho do módulo). Cada tabela do gabarito vira uma pasta
+    `<raiz>/aNN_silver_<amb>/gabarito/<tabela>/parte-0000.parquet`. Ambientes e artigos
+    diferentes convivem na mesma raiz, em catálogos de nomes diferentes.
     """
 
-    def __init__(self, raiz: str | Path):
+    def __init__(self, raiz: str | Path, artigo: str, ambiente: str = "dev"):
         self.raiz = Path(raiz)
-        self.volume = self.raiz / "landing" / "landing"
+        self.artigo = artigo
+        self.ambiente = validar_ambiente(ambiente)
+        self.catalogos = catalogos_do_artigo(artigo, ambiente)
 
-    def preparar(self, schemas: Sequence[str], reset: bool = False) -> None:
-        if reset and self.raiz.exists():
-            shutil.rmtree(self.raiz)
-        for schema in schemas:
-            (self.raiz / schema).mkdir(parents=True, exist_ok=True)
-        self.volume.mkdir(parents=True, exist_ok=True)
+    def pasta(self, camada: str) -> Path:
+        """Pasta do catálogo da camada (`bronze`, `silver` ou `gold`)."""
+        return self.raiz / self.catalogos[camada]
+
+    def pasta_sistema(self, sistema: str) -> Path:
+        """Raiz do Volume `landing` do sistema."""
+        return self.pasta("bronze") / sistema / VOLUME_LANDING
+
+    def pasta_gabarito(self) -> Path:
+        return self.pasta("silver") / SCHEMA_GABARITO
+
+    def preparar(self, sistemas: Sequence[str], gabarito: bool = False, reset: bool = False) -> None:
+        if reset:
+            for camada in self.catalogos:
+                shutil.rmtree(self.pasta(camada), ignore_errors=True)
+        for camada in self.catalogos:
+            self.pasta(camada).mkdir(parents=True, exist_ok=True)
+        for sistema in sistemas:
+            self.pasta_sistema(sistema).mkdir(parents=True, exist_ok=True)
+        (self.pasta("bronze") / SCHEMA_CONTROLE / VOLUME_RELOGIO).mkdir(parents=True, exist_ok=True)
+        if gabarito:
+            self.pasta_gabarito().mkdir(parents=True, exist_ok=True)
 
     def gravar_arquivos(self, arquivos: Iterable[Arquivo]) -> None:
         for arquivo in arquivos:
+            local = localizar(arquivo.caminho)
+            if not (self.pasta("bronze") / local.schema).is_dir():
+                raise ValueError(
+                    f"O schema '{local.schema}' não existe no catálogo {self.catalogos['bronze']}: "
+                    f"o sistema não faz parte da fatia de {self.artigo}."
+                )
             alvo = self._caminho(arquivo.caminho)
             alvo.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -83,10 +159,21 @@ class DestinoLocal:
                     ) from None
 
     def listar(self, prefixo: str) -> list[str]:
-        base = self._caminho(prefixo)
-        if not base.is_dir():
+        prefixo = prefixo.strip("/")
+        bronze = self.pasta("bronze")
+        if not bronze.is_dir():
             return []
-        return sorted(p.relative_to(self.volume).as_posix() for p in base.rglob("*") if p.is_file())
+        schemas = [prefixo.split("/")[0]] if prefixo else sorted(p.name for p in bronze.iterdir() if p.is_dir())
+        caminhos = []
+        for schema in schemas:
+            for volume in sorted(p for p in (bronze / schema).glob("*") if p.is_dir()):
+                for arquivo in volume.rglob("*"):
+                    if arquivo.is_file():
+                        resto = arquivo.relative_to(volume).as_posix()
+                        caminho = caminho_do_contrato(Local(schema, volume.name, resto))
+                        if not prefixo or caminho == prefixo or caminho.startswith(prefixo + "/"):
+                            caminhos.append(caminho)
+        return sorted(caminhos)
 
     def ler(self, caminho: str) -> bytes:
         return self._caminho(caminho).read_bytes()
@@ -94,7 +181,7 @@ class DestinoLocal:
     def gravar_gabarito(self, tabela: str, df: "DataFrame", acrescentar: bool = False) -> None:
         import pyarrow.parquet as pq
 
-        pasta = self.raiz / "gabarito" / tabela
+        pasta = self.pasta_gabarito() / tabela
         if pasta.exists() and not acrescentar:
             shutil.rmtree(pasta)
         pasta.mkdir(parents=True, exist_ok=True)
@@ -108,15 +195,17 @@ class DestinoLocal:
 
         # Cada parte é regravada no lugar (nunca apagada): `gravar_gabarito` numera a próxima
         # parte pela contagem, então remover uma do meio faria a seguinte sobrescrever outra.
-        for caminho in sorted((self.raiz / "gabarito" / tabela).glob("parte-*.parquet")):
+        for caminho in sorted((self.pasta_gabarito() / tabela).glob("parte-*.parquet")):
             dados = pq.read_table(caminho)
             limite = pa.scalar(a_partir_de, dados.schema.field(coluna).type)
             manter = pc.or_(pc.is_null(dados[coluna]), pc.less(dados[coluna], limite))
             if not pc.all(manter).as_py():
                 pq.write_table(dados.filter(manter), caminho)
 
-    def _caminho(self, relativo: str) -> Path:
-        alvo = (self.volume / relativo).resolve()
-        if not alvo.is_relative_to(self.volume.resolve()):
-            raise ValueError(f"Caminho fora da landing: {relativo}")
+    def _caminho(self, caminho: str) -> Path:
+        local = localizar(caminho)
+        volume = self.pasta("bronze") / local.schema / local.volume
+        alvo = (volume / local.resto).resolve()
+        if not alvo.is_relative_to(volume.resolve()):
+            raise ValueError(f"Caminho fora da landing: {caminho}")
         return alvo

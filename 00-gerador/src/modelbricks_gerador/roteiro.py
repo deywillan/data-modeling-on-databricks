@@ -335,7 +335,6 @@ class Evento(_Modelo):
 class Defeito(_Modelo):
     descricao: str
     taxas: dict[str, float | Literal["arquivo", "coluna"]]
-    artigos: list[int]
     atraso_dias: Intervalo | None = None  # defeitos de entrega: dias até a linha chegar
 
 
@@ -343,7 +342,6 @@ class Fatia(_Modelo):
     """O que o `00_setup` de um artigo grava: sistemas, gabarito e janela de telemetria."""
 
     artigo: str
-    catalogo: str
     sistemas: list[str] = Field(min_length=1)
     gabarito: bool
     janela_telemetria_dias: int | None = Field(default=None, gt=0)
@@ -403,11 +401,8 @@ class Roteiro(_Modelo):
             if atraso is not None and not 1 <= atraso.minimo <= atraso.maximo:
                 erros.append(f"defeitos.{nome}.atraso_dias: é preciso 1 <= minimo <= maximo")
         for artigo, fatia in self.fatias.items():
-            casamento = _ARTIGO.match(artigo)
-            if not casamento:
+            if not _ARTIGO.match(artigo):
                 erros.append(f"fatias.{artigo}: o artigo deve seguir o padrão 'NN-tema'")
-            elif fatia.catalogo != f"medalhao_{casamento[1]}_{casamento[2].replace('-', '_')}":
-                erros.append(f"fatias.{artigo}: catálogo '{fatia.catalogo}' fora do padrão medalhao_NN_<tema>")
             erros += [f"fatias.{artigo}: sistema desconhecido '{s}'" for s in fatia.sistemas if s not in self.sistemas]
         if erros:
             raise ValueError("; ".join(erros))

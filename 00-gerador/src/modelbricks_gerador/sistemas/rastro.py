@@ -34,7 +34,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from ..chaves import chave_do_sistema, mapa
-from ..defeitos import Alvo, Defeitos, registros, tabela_de_registros
+from ..defeitos import Alvo, registros, tabela_de_registros
 from ..escritor import Arquivo, caminho_landing
 from ..expressoes import uniforme
 from ..mundo import linhas as linhas_na_escala
@@ -70,7 +70,7 @@ class _Projecao:
         self.contexto = contexto
         self.roteiro = contexto.roteiro
         self.p = contexto.roteiro.parametros.rastro
-        self.defeitos = Defeitos(contexto.roteiro, SISTEMA)
+        self.defeitos = contexto.defeitos(SISTEMA)
         # Atraso máximo dos defeitos de entrega, mais um dia para o ajuste de até uma hora.
         self.folga = self.defeitos.folga_dias() + 1
         operacao = self.p.horario_operacao

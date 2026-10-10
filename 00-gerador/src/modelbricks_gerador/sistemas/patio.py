@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 from ..cdc import Mudancas
 from ..chaves import chave_do_sistema, mapa
-from ..defeitos import Alvo, Defeitos
+from ..defeitos import Alvo
 from ..expressoes import instante, uniforme as uniforme_sql, uniforme_do_lote
 from ..sementes import semente
 from ..snapshot import datas_de_snapshot, entrega_snapshot
@@ -74,7 +74,7 @@ class _Projecao:
         self.roteiro = contexto.roteiro
         self.p = contexto.roteiro.parametros.patio
         self.fim = fim
-        self.defeitos = Defeitos(contexto.roteiro, SISTEMA)
+        self.defeitos = contexto.defeitos(SISTEMA)
 
     # -- utilitários ------------------------------------------------------------------------
 

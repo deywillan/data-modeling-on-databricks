@@ -31,7 +31,10 @@ from pathlib import Path
 import geracoes
 import pytest
 
+from falsos import SISTEMAS_FALSOS, projecao_falsa
+
 from modelbricks_gerador import DestinoLocal
+from modelbricks_gerador.sistemas import PROJECOES
 
 
 GERACOES_EM_PARALELO = 3
@@ -48,6 +51,7 @@ _GERACOES = {
     "legados_em_partes": geracoes.LEGADOS_EM_PARTES,
     "fatia_05": geracoes.FATIA_05,
     "patio": geracoes.PATIO,
+    "limpa": geracoes.LIMPA,
     "patio_em_partes": geracoes.PATIO_EM_PARTES,
     "mundo_de_novo": geracoes.MUNDO,
 }
@@ -111,7 +115,20 @@ def spark():
 @pytest.fixture
 def destino(tmp_path):
     """Destino em diretório local, isolado por teste."""
-    return DestinoLocal(tmp_path / "medalhao_teste")
+    return DestinoLocal(tmp_path / "workspace_teste", "01-bronze", "t1")
+
+
+@pytest.fixture
+def sistemas_falsos(monkeypatch):
+    """Registra os sistemas falsos em `PROJECOES` (só durante o teste). Devolve a função que os
+    registra de novo, com `defeitos=True`, quando o teste precisa de defeitos para o gabarito."""
+
+    def registrar(defeitos: bool = False):
+        for sistema in SISTEMAS_FALSOS:
+            monkeypatch.setitem(PROJECOES, sistema, projecao_falsa(sistema, defeitos))
+
+    registrar()
+    return registrar
 
 
 def _obter(geracao: geracoes.Geracao, request, tmp_path_factory) -> geracoes.Gerada:
@@ -146,6 +163,13 @@ def legados(request, tmp_path_factory):
 def patio(request, tmp_path_factory):
     """Pátio na escala 0,2 (população de clientes para medir taxas), até 03/01/2026."""
     return _obter(geracoes.PATIO, request, tmp_path_factory)
+
+
+@pytest.fixture(scope="session")
+def limpa(request, tmp_path_factory):
+    """Os sistemas da `principal` (mais o Pátio) numa fatia sem gabarito, na escala 0,05, só a
+    carga inicial: a mesma história da `principal`, sem nenhum defeito injetado."""
+    return _obter(geracoes.LIMPA, request, tmp_path_factory)
 
 
 # Gerações usadas só por testes marcados como `lento`.

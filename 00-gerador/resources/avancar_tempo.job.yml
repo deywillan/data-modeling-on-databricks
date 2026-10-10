@@ -1,6 +1,7 @@
-# Job compartilhado avancar_tempo: avança o relógio simulado do catálogo de UM artigo e grava
-# na landing os lotes dos dias seguintes. Exige o <NN>_setup do mesmo artigo já executado.
-# Só toca no catálogo do artigo informado, então não quebra a autocontenção dos artigos.
+# Job compartilhado avancar_tempo: avança o relógio simulado dos catálogos de UM artigo e grava
+# nas landings os lotes dos dias seguintes. Exige o <NN>_setup do mesmo artigo já executado.
+# Só toca nos catálogos do artigo informado (no ambiente do target), então não quebra a
+# autocontenção dos artigos.
 #
 #   databricks bundle run avancar_tempo -p <seu-perfil> --params artigo=01-bronze,dias=1
 
@@ -22,7 +23,7 @@ resources:
             parameters:
               - "--artigo={{job.parameters.artigo}}"
               - "--dias={{job.parameters.dias}}"
-              - "--sufixo-catalogo=${var.sufixo_catalogo}"
+              - "--ambiente=${var.ambiente}"
       # Sem cluster declarado: o job roda em compute serverless (o único do Free Edition).
       environments:
         - environment_key: gerador
