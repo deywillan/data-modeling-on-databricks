@@ -1,0 +1,33 @@
+# Job de setup do artigo 03 (3FN): cria o catálogo medalhao_03_3fn, os schemas landing (com
+# Volume), bronze, silver, gold e gabarito, e grava a carga inicial da fatia na landing.
+#
+#   databricks bundle run 03_setup -p <seu-perfil>
+#   databricks bundle run 03_setup -p <seu-perfil> --params escala=0.1,reset=true
+
+resources:
+  jobs:
+    03_setup:
+      name: 03_setup
+      parameters:
+        - name: escala
+          default: "1"
+        - name: reset
+          default: "false"
+      tasks:
+        - task_key: gerar_fatia
+          environment_key: gerador
+          python_wheel_task:
+            package_name: modelbricks_gerador
+            entry_point: gerar_fatia
+            parameters:
+              - "--artigo=03-3fn"
+              - "--escala={{job.parameters.escala}}"
+              - "--reset={{job.parameters.reset}}"
+              - "--sufixo-catalogo=${var.sufixo_catalogo}"
+      # Sem cluster declarado: o job roda em compute serverless (o único do Free Edition).
+      environments:
+        - environment_key: gerador
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../../00-gerador/dist/*.whl
