@@ -36,7 +36,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from ..chaves import chave_do_sistema, mapa
-from ..defeitos import Alvo, Defeitos, tabela_de_registros
+from ..defeitos import Alvo, tabela_de_registros
 from ..incremental import CSV, Versoes, entrega_incremental
 from ..expressoes import instante, sorteio, uniforme, uniforme_do_lote
 from ..mundo import linhas as linhas_na_escala
@@ -74,7 +74,7 @@ class _Projecao:
         self.p = contexto.roteiro.parametros.apolice
         self.fim = fim
         self.inicio = contexto.roteiro.datas.inicio
-        self.defeitos = Defeitos(contexto.roteiro, SISTEMA)
+        self.defeitos = contexto.defeitos(SISTEMA)
 
     def semente(self, *partes: str) -> int:
         return semente(self.roteiro.seed_base, SISTEMA, *partes)

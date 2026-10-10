@@ -37,7 +37,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from ..chaves import chave_do_sistema, mapa
-from ..defeitos import Alvo, Defeitos, registros, tabela_de_registros
+from ..defeitos import Alvo, registros, tabela_de_registros
 from ..escritor import Arquivo, caminho_landing
 from ..expressoes import instante, sorteio, uniforme_do_lote
 from ..sementes import semente
@@ -67,7 +67,7 @@ class _Projecao:
         self.empresa = contexto.roteiro.sistemas[SISTEMA].empresa
         self.coluna_nova = contexto.roteiro.eventos[EVENTO_COLUNA_NOVA].data
         self.reajuste = contexto.roteiro.eventos[EVENTO_REAJUSTE]
-        self.defeitos = Defeitos(contexto.roteiro, SISTEMA)
+        self.defeitos = contexto.defeitos(SISTEMA)
 
     def chave(self, entidade: str, coluna_id: str, digitos: int) -> str:
         return chave_do_sistema(self.roteiro.seed_base, SISTEMA, entidade, coluna_id, digitos)

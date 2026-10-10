@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 from dataclasses import replace
 
 from ..chaves import chave_do_sistema, mapa
-from ..defeitos import Alvo, Defeitos
+from ..defeitos import Alvo
 from ..incremental import PARQUET, Versoes, entrega_incremental
 from ..expressoes import instante, sorteio, uniforme, uniforme_do_lote
 from ..sementes import semente
@@ -73,7 +73,7 @@ class _Projecao:
         self.p = contexto.roteiro.parametros.nucleo
         self.fim = fim
         self.inicio = contexto.roteiro.datas.inicio
-        self.defeitos = Defeitos(contexto.roteiro, SISTEMA)
+        self.defeitos = contexto.defeitos(SISTEMA)
 
     def chave(self, entidade: str, coluna_id: str, digitos: int) -> str:
         return chave_do_sistema(self.roteiro.seed_base, SISTEMA, entidade, coluna_id, digitos)

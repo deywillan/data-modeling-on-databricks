@@ -15,6 +15,7 @@ from datetime import date, timedelta
 from functools import cached_property
 from typing import TYPE_CHECKING
 
+from ..defeitos import Defeitos
 from ..escritor import Arquivo
 from ..expressoes import inteiro_e_fracao, uniforme
 from ..mundo import Mundo, gerar_mundo, linhas as linhas_na_escala
@@ -34,6 +35,10 @@ class Contexto:
     fatia: Fatia
     escala: float
     carga_inicial: bool  # True na carga inicial do gerar_fatia; False no avancar_tempo
+
+    def defeitos(self, sistema: str) -> Defeitos:
+        """Defeitos do sistema nesta fatia: os do roteiro se a fatia tem gabarito, nenhum se não tem."""
+        return Defeitos(self.roteiro, sistema, injetar=self.fatia.gabarito)
 
     @cached_property
     def mundo(self) -> Mundo:
