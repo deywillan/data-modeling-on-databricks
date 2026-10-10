@@ -6,7 +6,9 @@
 As duas devolvem um `Resultado` e imprimem uma mensagem curta em português.
 """
 
-from dataclasses import dataclass
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from functools import reduce
 from pathlib import Path
@@ -77,13 +79,14 @@ def gerar_fatia(
         )
 
     contexto = Contexto(_sessao(spark, roteiro), roteiro, fatia, float(escala), carga_inicial=True)
-    entregas = _projetar(contexto, roteiro.datas.inicio, ate, destino)
-    arquivos = sum(len(e.lotes) for e in entregas)
+    entregas, arquivos = _projetar(contexto, roteiro.datas.inicio, ate, destino)
     if fatia.gabarito:
+        t0 = time.monotonic()
         for tabela in contexto.mundo:
             destino.gravar_gabarito(tabela, contexto.mundo.ordenado(tabela))
         _gravar_mapa_chaves(entregas, destino)
         _gravar_defeitos(contexto, entregas, destino, acrescentar=False)
+        print(f"  gabarito: {time.monotonic() - t0:.0f} s")
     gravar_relogio(destino, Relogio(ate, artigo, float(escala), roteiro.versao))
     return _concluir(
         Resultado(
@@ -116,8 +119,7 @@ def avancar_tempo(
     inicio = relogio.data_simulada + timedelta(days=1)
     fim = relogio.data_simulada + timedelta(days=dias)
     contexto = Contexto(_sessao(spark, roteiro), roteiro, fatia, relogio.escala, carga_inicial=False)
-    entregas = _projetar(contexto, inicio, fim, destino)
-    arquivos = sum(len(e.lotes) for e in entregas)
+    entregas, arquivos = _projetar(contexto, inicio, fim, destino)
     if fatia.gabarito:
         _gravar_mapa_chaves(entregas, destino)
         _gravar_defeitos(contexto, entregas, destino, acrescentar=True)
@@ -130,18 +132,43 @@ def avancar_tempo(
     )
 
 
-def _projetar(contexto: Contexto, inicio: date, fim: date, destino: Destino) -> list[Entrega]:
-    """Projeta cada sistema da fatia no intervalo e grava os lotes na landing."""
-    entregas = []
-    for sistema in contexto.fatia.sistemas:
-        projetar = PROJECOES.get(sistema)
-        if projetar is None:
-            print(f"Aviso: o sistema '{sistema}' ainda não tem projeção no gerador; ignorado.")
-            continue
-        entrega = projetar(contexto, inicio, fim)
-        destino.gravar_arquivos(lote.arquivo for lote in entrega.lotes)
-        entregas.append(entrega)
-    return entregas
+def _projetar(contexto: Contexto, inicio: date, fim: date, destino: Destino) -> tuple[list[Entrega], int]:
+    """Projeta cada sistema da fatia no intervalo e grava os lotes na landing.
+
+    A gravação de um sistema roda numa thread enquanto o Spark gera o seguinte (a geração e o
+    upload levam, cada um, metade do tempo do setup). No máximo uma gravação fica pendente,
+    então a memória guarda os arquivos de no máximo dois sistemas. Devolve as entregas sem os
+    bytes dos lotes (já gravados) e o número de arquivos gravados.
+    """
+    entregas, arquivos = [], 0
+    with ThreadPoolExecutor(max_workers=1) as gravador:
+        pendente = None
+        for sistema in contexto.fatia.sistemas:
+            projetar = PROJECOES.get(sistema)
+            if projetar is None:
+                print(f"Aviso: o sistema '{sistema}' ainda não tem projeção no gerador; ignorado.")
+                continue
+            t0 = time.monotonic()
+            entrega = projetar(contexto, inicio, fim)
+            geracao = time.monotonic() - t0
+            if pendente is not None:
+                pendente.result()  # propaga a primeira exceção (ex.: ArquivoJaExiste)
+            pendente = gravador.submit(_gravar_lotes, destino, sistema, entrega.lotes, geracao)
+            arquivos += len(entrega.lotes)
+            entregas.append(replace(entrega, lotes=[]))
+        if pendente is not None:
+            pendente.result()
+    return entregas, arquivos
+
+
+def _gravar_lotes(destino: Destino, sistema: str, lotes: list, geracao: float) -> None:
+    t0 = time.monotonic()
+    destino.gravar_arquivos(lote.arquivo for lote in lotes)
+    megabytes = sum(len(lote.arquivo.conteudo) for lote in lotes) / 1e6
+    print(
+        f"  {sistema}: {len(lotes)} arquivos, {megabytes:.1f} MB "
+        f"(geração {geracao:.0f} s, gravação na landing {time.monotonic() - t0:.0f} s)"
+    )
 
 
 def _gravar_mapa_chaves(entregas: list[Entrega], destino: Destino) -> None:

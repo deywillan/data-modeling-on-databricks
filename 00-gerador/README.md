@@ -97,6 +97,10 @@ Toda mudança no roteiro muda os dados gerados e, por isso, incrementa o campo `
 
 O parâmetro `escala` do `<NN>_setup` multiplica linearmente os volumes do roteiro: `1` é o tamanho de referência, e valores como `0.1` servem para um teste rápido. A escala muda os dados, então compare os seus números com os do artigo usando a mesma escala.
 
+Nas populações distribuídas entre empresas (rotas, bases, lojas e colaboradores), o roteiro garante ao menos uma instância por empresa (`mundo.minimo_por_empresa`), de modo que mesmo a escala `0.01` entrega todas as divisões com dados (a Viação, por exemplo, sempre tem rota e passagens).
+
+Na escala 1, no Free Edition, o `<NN>_setup` leva de poucos minutos (cerca de 4 minutos para o artigo 01 e para o 05) a cerca de 6 minutos (artigo 10, com todos os sistemas e cerca de 2 GB na landing). O job imprime, por sistema, os arquivos, o tamanho e o tempo de geração e de gravação. Para conferir o que o setup deixou no catálogo, use `scripts/conferir_catalogo.py <catalogo>`: ele resume a landing por pasta (`--arquivos` lista cada arquivo).
+
 ### Eventos com data
 
 Alguns acontecimentos da história do grupo têm data marcada na seção `eventos:` do roteiro, cada um com os sistemas que afeta e uma descrição:
