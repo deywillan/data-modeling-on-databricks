@@ -55,11 +55,21 @@ class _Observado:
             self.unicas.setdefault(op["seq"], op)
         self.reentregas = [o for o in operacoes if self.unicas[o["seq"]] is not o]
         mapa = {(m["coluna"], int(m["chave_sistema"])): m["id_verdadeiro"] for m in gabarito["mapa_chaves"]}
+        self.mapa = mapa
         pessoas = {p["id_pessoa"]: p for p in gabarito["pessoas"]}
         ops = list(self.unicas.values())
         clientes = {o["id_cliente"]: o for o in ops if o["_entidade"] == "clientes"}
-        self.clientes_originais = {k: pessoas[mapa[("id_cliente", k)]] for k in clientes if ("id_cliente", k) in mapa}
-        self.duplicados = {k for k in clientes if ("id_cliente", k) not in mapa}
+        # O mapa traz todas as chaves de cliente da landing, as cópias duplicadas inclusive, cada
+        # uma com o id da pessoa. Quem é cópia, só o registro de defeitos diz (valor_sujo).
+        assert all(("id_cliente", k) in mapa for k in clientes), "chave de cliente fora do mapa"
+        copias = {
+            int(r["valor_sujo"]) for r in gabarito["defeitos"] if r["tipo"] == "pessoa_duplicada_no_sistema"
+        }
+        self.clientes_originais = {k: pessoas[mapa[("id_cliente", k)]] for k in clientes if k not in copias}
+        chaves_por_pessoa = defaultdict(set)
+        for k in clientes:
+            chaves_por_pessoa[mapa[("id_cliente", k)]].add(k)
+        self.pessoas_duplicadas = {pessoa for pessoa, chaves in chaves_por_pessoa.items() if len(chaves) > 1}
         self.clientes = clientes
         linhas = {o["cod_linha"] for o in ops if o["_entidade"] == "tarifas"}
         passagens = defaultdict(set)
@@ -85,14 +95,14 @@ class _Observado:
             "cpf_fora_do_padrao": ({("clientes", k) for k in diferentes("cpf")}, len(originais)),
             "nome_abreviado_ou_com_erro": ({("clientes", k) for k in diferentes("nome")}, len(originais)),
             "contato_nulo": ({("clientes", k) for k in nulos}, len(originais)),
-            "pessoa_duplicada_no_sistema": ({("clientes", k) for k in self.duplicados}, len(originais)),
+            "pessoa_duplicada_no_sistema": ({("pessoa", p) for p in self.pessoas_duplicadas}, len(originais)),
             "fk_orfa": ({("passagens", k) for k in self.orfas}, len(self.passagens)),
             "evento_atrasado": ({("seq", s) for s in self.atrasadas}, len(self.ops)),
             "cdc_duplicado": ({("seq", o["seq"]) for o in self.reentregas}, len(self.ops)),
         }
 
 
-def _registrados(gabarito, clientes_originais) -> dict[str, set]:
+def _registrados(gabarito, clientes_originais, mapa) -> dict[str, set]:
     """tipo → identificação de cada defeito registrado (na mesma forma de `_Observado`).
 
     Os defeitos de valor medidos em `_Observado` são os dos clientes originais; os que caem
@@ -104,7 +114,7 @@ def _registrados(gabarito, clientes_originais) -> dict[str, set]:
         if r["tipo"] in ("evento_atrasado", "cdc_duplicado"):
             registrados[r["tipo"]].add(("seq", r["seq"]))
         elif r["tipo"] == "pessoa_duplicada_no_sistema":
-            registrados[r["tipo"]].add((r["entidade"], int(r["valor_sujo"])))
+            registrados[r["tipo"]].add(("pessoa", mapa[("id_cliente", int(r["valor_sujo"]))]))
         elif r["entidade"] != "clientes" or int(r["chave_sistema"]) in clientes_originais:
             registrados[r["tipo"]].add((r["entidade"], int(r["chave_sistema"])))
     return registrados
@@ -131,7 +141,7 @@ def test_taxa_observada_de_cada_defeito_fica_na_tolerancia_do_roteiro(gerado):
 def test_todo_defeito_observavel_na_landing_tem_registro_no_gabarito(gerado):
     _, operacoes, gabarito = gerado
     observado = _Observado(operacoes, gabarito)
-    registrados = _registrados(gabarito, set(observado.clientes_originais))
+    registrados = _registrados(gabarito, set(observado.clientes_originais), observado.mapa)
     artigos = {tipo: d.artigos for tipo, d in carregar_roteiro().defeitos.items()}
 
     for tipo, (ocorrencias, _) in observado.por_tipo().items():

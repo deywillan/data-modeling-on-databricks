@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from ..chaves import chave_do_sistema, mapa
 from ..defeitos import Alvo, Defeitos, registros, tabela_de_registros
 from ..escritor import Arquivo, caminho_landing
+from ..expressoes import uniforme
 from ..mundo import linhas as linhas_na_escala
 from .base import Contexto, Entrega, Lote, calendario, materializar
 
@@ -87,10 +88,6 @@ class _Projecao:
     def chave(self, coluna_id: str) -> str:
         return chave_do_sistema(self.roteiro.seed_base, SISTEMA, "veiculos", coluna_id, 6)
 
-    def sorteio(self, *colunas: str) -> str:
-        """Uniforme em [0, 1), determinística pelas colunas (que incluem a semente do dia)."""
-        return f"(pmod(xxhash64({', '.join(colunas)}), 1000000) / 1000000.0)"
-
     # -- frota vinda do mundo verdadeiro --------------------------------------------------
 
     @cached_property
@@ -125,25 +122,25 @@ class _Projecao:
         lat, lon = p.area_operacao.latitude, p.area_operacao.longitude
         vel, cons, temp, rpm = p.velocidade_kmh, p.consumo_combustivel_pct_dia, p.temperatura_motor_c, p.rpm
 
-        def dia(k: int) -> str:  # sorteio por veículo e dia
-            return self.sorteio("semente", "id_veiculo", str(k))
+        def por_veiculo_e_dia(numero: int) -> str:
+            return uniforme("semente", "id_veiculo", numero)
 
-        def evento(k: int) -> str:  # sorteio por evento
-            return self.sorteio("semente", "id_veiculo", "k", str(k))
+        def por_evento(numero: int) -> str:  # `k` é o sequencial do evento no dia
+            return uniforme("semente", "id_veiculo", "k", numero)
 
         fracao = f"(k / {max(n - 1, 1)}.0)"
 
-        def entre(minimo, maximo, u: str) -> str:
-            return f"({minimo!r} + ({maximo!r} - {minimo!r}) * {u})"
+        def entre(minimo, maximo, sorteado: str) -> str:
+            return f"({minimo!r} + ({maximo!r} - {minimo!r}) * {sorteado})"
 
-        lat_o, lat_d = entre(lat.minimo, lat.maximo, dia(2)), entre(lat.minimo, lat.maximo, dia(3))
-        lon_o, lon_d = entre(lon.minimo, lon.maximo, dia(4)), entre(lon.minimo, lon.maximo, dia(5))
-        velocidade = f"cast(round({entre(vel.minimo, vel.maximo, evento(6))}, 1) AS decimal(5,1))"
+        lat_o, lat_d = (entre(lat.minimo, lat.maximo, por_veiculo_e_dia(numero)) for numero in (2, 3))
+        lon_o, lon_d = (entre(lon.minimo, lon.maximo, por_veiculo_e_dia(numero)) for numero in (4, 5))
+        velocidade = f"cast(round({entre(vel.minimo, vel.maximo, por_evento(6))}, 1) AS decimal(5,1))"
         alertas = (
             "filter(array("
             f"CASE WHEN velocidade_kmh > {p.limite_velocidade_kmh} "
             "THEN named_struct('tipo', 'excesso_velocidade', 'valor', velocidade_kmh) END, "
-            f"CASE WHEN {evento(10)} < {p.frenagem_brusca!r} "
+            f"CASE WHEN {por_evento(10)} < {p.frenagem_brusca!r} "
             "THEN named_struct('tipo', 'frenagem_brusca', 'valor', velocidade_kmh) END"
             "), a -> a IS NOT NULL)"
         )
@@ -162,8 +159,8 @@ class _Projecao:
                 f"cast(pmod(round(degrees(atan2({lon_d} - {lon_o}, {lat_d} - {lat_o}))), 360) AS int) AS direcao_graus",
                 f"{velocidade} AS velocidade_kmh",
                 f"cast(round((datediff(data, desde) - 1) * km_dia + km_dia * {fracao}, 1) AS decimal(10,1)) AS odometro_km",
-                f"cast(round(100 - {entre(cons.minimo, cons.maximo, dia(7))} * {fracao}, 1) AS decimal(4,1)) AS combustivel_pct",
-                f"cast(round({entre(temp.minimo, temp.maximo, evento(8))}, 1) AS decimal(4,1)) AS temperatura_motor_c",
+                f"cast(round(100 - {entre(cons.minimo, cons.maximo, por_veiculo_e_dia(7))} * {fracao}, 1) AS decimal(4,1)) AS combustivel_pct",
+                f"cast(round({entre(temp.minimo, temp.maximo, por_evento(8))}, 1) AS decimal(4,1)) AS temperatura_motor_c",
                 f"cast({rpm.minimo} + pmod(xxhash64(semente, id_veiculo, k, 9), {rpm.maximo - rpm.minimo + 1}) AS int) AS rpm",
                 "id_veiculo AS _id_verdadeiro",
             )

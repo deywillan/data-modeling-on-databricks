@@ -34,10 +34,10 @@ from typing import TYPE_CHECKING
 from ..cdc import Mudancas
 from ..chaves import chave_do_sistema, mapa
 from ..defeitos import Alvo, Defeitos
-from ..mundo import linhas as linhas_na_escala
+from ..expressoes import instante, uniforme as uniforme_sql, uniforme_do_lote
 from ..sementes import semente
 from ..snapshot import datas_de_snapshot, entrega_snapshot
-from .base import Contexto, Entrega, calendario, materializar
+from .base import Contexto, Entrega, calendario, linhas_por_dia, materializar, volume_por_dia
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -85,18 +85,14 @@ class _Projecao:
         return f"xxhash64({semente(self.roteiro.seed_base, SISTEMA, nome)}, {', '.join(colunas)})"
 
     def uniforme(self, nome: str, *colunas: str) -> str:
-        return f"(pmod({self.hash(nome, *colunas)}, 1000000) / 1000000.0)"
+        return uniforme_sql(semente(self.roteiro.seed_base, SISTEMA, nome), *colunas)
 
     def no_intervalo(self, nome: str, intervalo, *colunas: str) -> str:
         return f"({intervalo.minimo} + pmod({self.hash(nome, *colunas)}, {intervalo.maximo - intervalo.minimo + 1}))"
 
     def no_expediente(self, dia: str, nome: str, *colunas: str) -> str:
         """Instante dentro do horário de operação do dia."""
-        h = self.p.horario_operacao
-        return (
-            f"timestamp_seconds(unix_seconds(cast({dia} AS timestamp)) + {h.minimo * 3600} "
-            f"+ pmod({self.hash(nome, *colunas)}, {(h.maximo - h.minimo) * 3600}))"
-        )
+        return instante(dia, self.p.horario_operacao, semente(self.roteiro.seed_base, SISTEMA, nome), *colunas)
 
     def antes_do_expediente(self, dia: str, nome: str, *colunas: str) -> str:
         """Instante na hora anterior à abertura (cadastros e entradas antes de vendas do dia)."""
@@ -111,8 +107,8 @@ class _Projecao:
 
     def endereco(self, nome: str, *colunas: str) -> dict[str, str]:
         """Endereço sorteado (precisa das colunas `_municipios` e `_logradouros` dos pools)."""
-        def h(k: str) -> str:
-            return self.hash(nome, *colunas, k)
+        def h(sufixo: str) -> str:
+            return self.hash(nome, *colunas, sufixo)
 
         return {
             "cod_municipio": f"element_at(_municipios, cast(pmod({h('1')}, size(_municipios)) AS int) + 1)",
@@ -347,10 +343,8 @@ class _Projecao:
         from pyspark.sql import Window
         from pyspark.sql import functions as F
 
-        o, datas = self.p.ordens_servico, self.roteiro.datas
-        dias_historia = (datas.carga_inicial - datas.inicio).days + 1
-        por_dia = linhas_na_escala(self.roteiro.volumes.ordens_servico_patio, self.contexto.escala) / dias_historia
-        inteiro, fracao = int(por_dia), por_dia - int(por_dia)
+        o = self.p.ordens_servico
+        inteiro, fracao = volume_por_dia(self.contexto, self.roteiro.volumes.ordens_servico_patio)
 
         # Veículos vendidos numerados pela ordem de venda: num dia, os elegíveis são os
         # vendidos nos dias anteriores.
@@ -359,20 +353,14 @@ class _Projecao:
             (F.row_number().over(Window.orderBy("data_venda", "_id_venda")) - 1).alias("_indice_veiculo"),
         )
         novos = vendidos.groupBy(F.col("data_venda").alias("data")).agg(F.count(F.lit(1)).alias("_novos"))
-        dias = (
+        dias = linhas_por_dia(
             calendario(self.contexto, SISTEMA, self.fim)
             .join(novos, "data", "left")
             .withColumn("_disponiveis", F.sum(F.coalesce("_novos", F.lit(0))).over(
                 Window.orderBy("data").rowsBetween(Window.unboundedPreceding, -1)))
-            .where("_disponiveis > 0")
-            .withColumn("_n_dia", F.expr(
-                f"{inteiro} + CASE WHEN pmod(xxhash64(semente, 0), 1000000) / 1000000.0 < {fracao!r} THEN 1 ELSE 0 END"))
-            .where("_n_dia > 0")
-            .select("data", "semente", "_disponiveis", F.explode(F.sequence(F.lit(1), F.col("_n_dia"))).alias("n"))
+            .where("_disponiveis > 0"),
+            inteiro, fracao, "_disponiveis",
         )
-
-        def u(k: int) -> str:
-            return f"(pmod(xxhash64(semente, n, {k}), 1000000) / 1000000.0)"
 
         h, duracao, valor = self.p.horario_operacao, o.duracao_dias, o.valor
         tipos = ", ".join("'" + t.replace("'", "\\'") + "'" for t in o.tipos)
@@ -384,8 +372,8 @@ class _Projecao:
             f"+ pmod(xxhash64(semente, n, 2), {(h.maximo - h.minimo) * 3600})) AS _ts_abertura",
             f"element_at(array({tipos}), cast(pmod(xxhash64(semente, n, 3), {len(o.tipos)}) AS int) + 1) AS tipo_servico",
             f"{duracao.minimo} + pmod(xxhash64(semente, n, 4), {duracao.maximo - duracao.minimo + 1}) AS _duracao",
-            f"{u(5)} < {o.cancelamento!r} AS _cancelada",
-            f"cast(round({valor.minimo} + {valor.maximo - valor.minimo} * {u(6)}, 2) AS decimal(12,2)) AS _valor",
+            f"{uniforme_do_lote(5)} < {o.cancelamento!r} AS _cancelada",
+            f"cast(round({valor.minimo} + {valor.maximo - valor.minimo} * {uniforme_do_lote(6)}, 2) AS decimal(12,2)) AS _valor",
         ).join(vendidos, "_indice_veiculo").selectExpr(
             "*",
             "timestamp_seconds(unix_seconds(_ts_abertura) + _duracao * 86400 + 3600 "
@@ -407,13 +395,13 @@ class _Projecao:
         return abertas.unionByName(concluidas).unionByName(canceladas)
 
 
-def _cnpj(semente_: int) -> str:
+def _cnpj(semente_da_empresa: int) -> str:
     """CNPJ válido (matriz) derivado de um seed: raiz de 8 dígitos + 0001 + verificadores."""
     def verificador(digitos: str, pesos: list[int]) -> str:
         resto = sum(int(d) * p for d, p in zip(digitos, pesos)) % 11
         return "0" if resto < 2 else str(11 - resto)
 
-    base = f"{semente_ % 10**8:08d}0001"
+    base = f"{semente_da_empresa % 10**8:08d}0001"
     dv1 = verificador(base, _CNPJ_PESOS)
     return base + dv1 + verificador(base + dv1, [6, *_CNPJ_PESOS])
 

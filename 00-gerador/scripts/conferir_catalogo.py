@@ -4,12 +4,15 @@ Uso (da pasta 00-gerador/, com o perfil da sua CLI):
 
     DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py medalhao_01_bronze
     DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py medalhao_01_bronze --arquivos
+    DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py medalhao_01_bronze --relogio 2026-01-01
 
 Imprime schemas, Volumes, tabelas por schema e, da landing, o número de arquivos e o tamanho
 por pasta de primeiro nível (um sistema, o controle do relógio). Com `--arquivos`, lista também
 cada arquivo (tamanho e data de modificação). A listagem percorre as pastas em paralelo
 (`--threads`, 16 por padrão): sequencial, 3,7 mil arquivos levavam cerca de 20 minutos.
-Termina com erro se bronze, silver ou gold tiverem alguma tabela.
+Termina com erro se bronze, silver ou gold tiverem alguma tabela. Com `--relogio AAAA-MM-DD`,
+termina com erro também se o relógio simulado não estiver nessa data (o relógio atual é o
+arquivo de maior data em `_controle/relogio/`).
 """
 
 import argparse
@@ -43,7 +46,7 @@ def listar_landing(w: WorkspaceClient, raiz: str, threads: int) -> list:
     return sorted(arquivos, key=lambda item: item.path)
 
 
-def main(catalogo: str, arquivos: bool, threads: int) -> int:
+def main(catalogo: str, arquivos: bool, threads: int, relogio: str | None = None) -> int:
     spark = DatabricksSession.builder.serverless().getOrCreate()
     print("Schemas:", ", ".join(r[0] for r in spark.sql(f"SHOW SCHEMAS IN {catalogo}").collect()))
     print("Volumes em landing:", ", ".join(r["volume_name"] for r in spark.sql(f"SHOW VOLUMES IN {catalogo}.landing").collect()))
@@ -70,6 +73,16 @@ def main(catalogo: str, arquivos: bool, threads: int) -> int:
     total = sum(tamanho for _, tamanho in por_pasta.values())
     print(f"Landing total: {len(itens)} arquivos, {total} bytes ({total / 1e6:.1f} MB); listagem em {segundos:.0f} s")
 
+    if relogio is not None:
+        datas = sorted(
+            item.path.rsplit("/", 1)[1].removesuffix(".json")
+            for item in itens if "/_controle/relogio/" in item.path and item.path.endswith(".json")
+        )
+        atual = datas[-1] if datas else None
+        print(f"Relógio: {atual} (esperado {relogio})")
+        if atual != relogio:
+            erros += 1
+
     if arquivos:
         print("Arquivos na landing:")
         for item in itens:
@@ -83,5 +96,6 @@ if __name__ == "__main__":
     analisador.add_argument("catalogo")
     analisador.add_argument("--arquivos", action="store_true", help="lista também cada arquivo")
     analisador.add_argument("--threads", type=int, default=16, help="pastas listadas em paralelo")
+    analisador.add_argument("--relogio", metavar="AAAA-MM-DD", help="data em que o relógio simulado deve estar")
     argumentos = analisador.parse_args()
-    sys.exit(main(argumentos.catalogo, argumentos.arquivos, argumentos.threads))
+    sys.exit(main(argumentos.catalogo, argumentos.arquivos, argumentos.threads, argumentos.relogio))

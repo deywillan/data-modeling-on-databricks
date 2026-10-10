@@ -7,6 +7,7 @@ Unity Catalog nos jobs). O resto do pacote é interno.
 from .api import Resultado, avancar_tempo, gerar_fatia
 from .destino import ArquivoJaExiste, Destino, DestinoLocal
 from .destino_uc import DestinoUC
+from .relogio import RelogioIncompativel
 from .roteiro import RoteiroInvalido, carregar_roteiro
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "Destino",
     "DestinoLocal",
     "DestinoUC",
+    "RelogioIncompativel",
     "Resultado",
     "RoteiroInvalido",
     "avancar_tempo",

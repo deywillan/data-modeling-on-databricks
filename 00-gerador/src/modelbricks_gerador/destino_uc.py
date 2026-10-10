@@ -16,6 +16,7 @@ import io
 import re
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from typing import TYPE_CHECKING, Literal
 
 from .destino import ArquivoJaExiste
@@ -27,6 +28,9 @@ if TYPE_CHECKING:
 
 CATALOGO_ALTERNATIVO = "medalhao"
 VOLUME_LANDING = "landing"
+# A pesquisa técnica inicial sugeriu cerca de 16 threads para o upload ao Volume. Mantemos 32
+# de propósito: na medição do ticket 17 (escala 1, Free Edition), 32 threads reduziram em cerca
+# de 20% o tempo de gravação da landing em relação a 16.
 _THREADS_UPLOAD = 32
 _NUMERO_ARTIGO = re.compile(r"^medalhao_(\d{2})_")
 
@@ -75,7 +79,11 @@ class DestinoUC:
                     f"{volume}/{arquivo.caminho}", io.BytesIO(arquivo.conteudo), overwrite=False
                 )
             except AlreadyExists:
-                raise ArquivoJaExiste(f"A landing nunca sobrescreve: {arquivo.caminho} já existe.") from None
+                # Idêntico ao que já está lá (nova tentativa de uma chamada que caiu): conta como gravado.
+                if self.ler(arquivo.caminho) != arquivo.conteudo:
+                    raise ArquivoJaExiste(
+                        f"A landing nunca sobrescreve: {arquivo.caminho} já existe com outro conteúdo."
+                    ) from None
 
         with ThreadPoolExecutor(max_workers=_THREADS_UPLOAD) as executor:
             # list() propaga a primeira exceção (ex.: ArquivoJaExiste).
@@ -103,6 +111,11 @@ class DestinoUC:
 
     def gravar_gabarito(self, tabela: str, df: "DataFrame", acrescentar: bool = False) -> None:
         df.write.mode("append" if acrescentar else "overwrite").saveAsTable(f"{self.schema('gabarito')}.{tabela}")
+
+    def apagar_do_gabarito(self, tabela: str, coluna: str, a_partir_de: date) -> None:
+        schema = self.schema("gabarito")
+        if self._sql(f"SHOW TABLES IN {schema} LIKE '{tabela}'").collect():
+            self._sql(f"DELETE FROM {schema}.{tabela} WHERE {coluna} >= DATE'{a_partir_de.isoformat()}'")
 
     # --- onde as coisas ficam ---------------------------------------------------------
 

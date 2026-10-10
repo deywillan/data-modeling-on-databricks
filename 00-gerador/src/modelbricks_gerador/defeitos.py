@@ -31,6 +31,7 @@ Defeitos de entrega (contrato com quem monta os lotes, ver `cdc.py`):
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .expressoes import uniforme
 from .roteiro import Roteiro
 from .sementes import semente
 
@@ -164,12 +165,30 @@ class Defeitos:
         from pyspark.sql import functions as F
 
         df = self._com_anotacoes(df)
-        copias = df.where(self._sorteado(tipo, alvo)).withColumn("_chave_original", self._chave_texto(alvo))
-        for coluna, expressao in nova_chave.items():
-            copias = copias.withColumn(coluna, F.expr(expressao).cast(df.schema[coluna].dataType))
+        copias = self._copias_de_pessoas(df, alvo, nova_chave)
         anotacao = self._anotacao(tipo, alvo, ",".join(alvo.chave), F.col("_chave_original"), self._chave_texto(alvo))
         copias = copias.withColumn("_defeitos", _lista(anotacao)).drop("_chave_original")
         return df.unionByName(copias)
+
+    def copias_de_pessoas(self, df: "DataFrame", alvo: Alvo, nova_chave: dict[str, str]) -> "DataFrame":
+        """As cópias que `pessoa_duplicada_no_sistema` acrescentaria a `df`, sem anotação: as
+        linhas sorteadas, com a chave trocada por `nova_chave`. `df` precisa ter as colunas da
+        chave do alvo e as que as expressões de `nova_chave` usam. Vazio se o defeito não está
+        ativo no sistema. A projeção usa as chaves das cópias para completar o mapa de chaves do
+        gabarito, e o sorteio é o mesmo que decide a cópia nos lotes."""
+        if not self._ativo("pessoa_duplicada_no_sistema"):
+            return df.where("false")
+        return self._copias_de_pessoas(df, alvo, nova_chave).drop("_chave_original")
+
+    def _copias_de_pessoas(self, df: "DataFrame", alvo: Alvo, nova_chave: dict[str, str]) -> "DataFrame":
+        """Linhas sorteadas com a chave trocada; `_chave_original` guarda o texto da chave antes da troca."""
+        from pyspark.sql import functions as F
+
+        copias = df.where(self._sorteado("pessoa_duplicada_no_sistema", alvo)).withColumn(
+            "_chave_original", self._chave_texto(alvo))
+        for coluna, expressao in nova_chave.items():
+            copias = copias.withColumn(coluna, F.expr(expressao).cast(df.schema[coluna].dataType))
+        return copias
 
     # -- defeitos de linha: entrega ----------------------------------------------------------
 
@@ -282,8 +301,7 @@ class Defeitos:
         return ", ".join(alvo.chave)
 
     def _sorteio(self, tipo: str, alvo: Alvo, *extra: str) -> str:
-        colunas = ", ".join((*alvo.chave, *extra))
-        return f"(pmod(xxhash64({self._semente(tipo, alvo)}, {colunas}), 1000000) / 1000000.0)"
+        return uniforme(self._semente(tipo, alvo), *alvo.chave, *extra)
 
     def _sorteado(self, tipo: str, alvo: Alvo, *extra: str) -> "Column":
         from pyspark.sql import functions as F
@@ -345,10 +363,10 @@ class Defeitos:
         atraso = self.roteiro.defeitos[tipo].atraso_dias
         if atraso is None:
             raise ValueError(f"defeitos.{tipo}: falta atraso_dias no roteiro.")
-        semente_ = self._semente(tipo, alvo)
+        semente_do_tipo = self._semente(tipo, alvo)
         colunas = ", ".join((*alvo.chave, instante))
-        dias = f"({atraso.minimo} + pmod(xxhash64({semente_}, {colunas}, 1), {atraso.maximo - atraso.minimo + 1}))"
-        ajuste = f"pmod(xxhash64({semente_}, {colunas}, 2), 3600)"
+        dias = f"({atraso.minimo} + pmod(xxhash64({semente_do_tipo}, {colunas}, 1), {atraso.maximo - atraso.minimo + 1}))"
+        ajuste = f"pmod(xxhash64({semente_do_tipo}, {colunas}, 2), 3600)"
         return F.expr(f"timestamp_seconds(unix_seconds(_entrega) + {dias} * {_SEGUNDOS_DIA} + {ajuste})")
 
     @staticmethod

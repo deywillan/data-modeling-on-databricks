@@ -40,10 +40,9 @@ from dataclasses import replace
 from ..chaves import chave_do_sistema, mapa
 from ..defeitos import Alvo, Defeitos
 from ..incremental import PARQUET, Versoes, entrega_incremental
-from ..mundo import linhas as linhas_na_escala
-from ..roteiro import Intervalo
+from ..expressoes import instante, sorteio, uniforme, uniforme_do_lote
 from ..sementes import semente
-from .base import Contexto, Entrega, calendario, materializar
+from .base import Contexto, Entrega, calendario, linhas_por_dia, materializar, volume_por_dia
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -112,35 +111,14 @@ class _Projecao:
 
     # -- expressões comuns ------------------------------------------------------------------
 
-    @staticmethod
-    def u(semente_: "int | str", *colunas: str) -> str:
-        """Uniforme em [0, 1) por hash estável das colunas."""
-        return f"(pmod(xxhash64({semente_}, {', '.join(colunas)}), 1000000) / 1000000.0)"
-
-    @staticmethod
-    def instante(data: str, faixa: Intervalo, semente_: "int | str", *colunas: str) -> str:
-        """Timestamp no dia `data`, na faixa de horas, sorteado pelas colunas."""
-        return (
-            f"timestamp_seconds(unix_seconds(cast({data} AS timestamp)) + {faixa.minimo * 3600} "
-            f"+ pmod(xxhash64({semente_}, {', '.join(colunas)}), {(faixa.maximo - faixa.minimo) * 3600}))"
-        )
-
-    def entrada(self, data: str, semente_: "int | str", *colunas: str) -> str:
+    def entrada(self, data: str, semente_ou_coluna: "int | str", *colunas: str) -> str:
         """Instante da primeira versão: de madrugada no dia da implantação (registros que já
         existiam antes do *Núcleo*) ou no expediente do próprio dia."""
         return (
             f"CASE WHEN {data} <= DATE'{self.inicio.isoformat()}' "
-            f"THEN {self.instante(f'DATE{self.inicio.isoformat()!r}', self.p.horario_implantacao, semente_, *colunas)} "
-            f"ELSE {self.instante(data, self.p.horario_expediente, semente_, *colunas)} END"
+            f"THEN {instante(f'DATE{self.inicio.isoformat()!r}', self.p.horario_implantacao, semente_ou_coluna, *colunas)} "
+            f"ELSE {instante(data, self.p.horario_expediente, semente_ou_coluna, *colunas)} END"
         )
-
-    @staticmethod
-    def sorteio(pesos: dict[str, float], u: str) -> str:
-        nomes, total, acumulado, casos = sorted(pesos), sum(pesos.values()), 0.0, []
-        for nome in nomes[:-1]:
-            acumulado += pesos[nome] / total
-            casos.append(f"WHEN {u} < {acumulado!r} THEN '{nome}'")
-        return f"CASE {' '.join(casos)} ELSE '{nomes[-1]}' END" if casos else f"'{nomes[-1]}'"
 
     @staticmethod
     def por_dia(taxa_ao_ano: float) -> float:
@@ -185,14 +163,14 @@ class _Projecao:
         mudancas = (
             self.calendario().crossJoin(base)
             .where("data > _desde AND size(_cargos) > 1")
-            .where(f"{self.u('semente', '_id_verdadeiro', '1')} < {self.por_dia(self.p.mudanca_cargo_ao_ano)!r}")
+            .where(f"{uniforme('semente', '_id_verdadeiro', '1')} < {self.por_dia(self.p.mudanca_cargo_ao_ano)!r}")
             .withColumn("_passo", F.expr("1 + pmod(xxhash64(semente, _id_verdadeiro, 2), size(_cargos) - 1)"))
             .withColumn("_acumulado", F.sum("_passo").over(janela))
             .withColumn("cargo", F.expr(
                 "element_at(_cargos, cast(pmod(array_position(_cargos, cargo) - 1 + _acumulado, size(_cargos)) + 1 AS int))"))
             .selectExpr(
                 "_id_verdadeiro", *imagem,
-                f"{self.instante('data', self.p.horario_expediente, 'semente', '_id_verdadeiro', '3')} AS updated_at",
+                f"{instante('data', self.p.horario_expediente, 'semente', '_id_verdadeiro', '3')} AS updated_at",
                 "false AS excluido",
             )
         )
@@ -206,12 +184,12 @@ class _Projecao:
         s = self.semente("fornecedores")
         dias_historia = (self.roteiro.datas.carga_inicial - self.inicio).days + 1
         cadastro = (
-            f"CASE WHEN {self.u(s, 'id_empresa', '1')} < {self.p.fornecedores_na_implantacao!r} "
+            f"CASE WHEN {uniforme(s, 'id_empresa', '1')} < {self.p.fornecedores_na_implantacao!r} "
             f"THEN DATE'{self.inicio.isoformat()}' "
             f"ELSE date_add(DATE'{self.inicio.isoformat()}', cast(pmod(xxhash64({s}, id_empresa, 2), {dias_historia}) AS int)) END"
         )
         return materializar(self.contexto, self.contexto.mundo["empresas_pj"].where(
-            f"{self.u(s, 'id_empresa', '0')} < {self.p.fornecedores!r}"
+            f"{uniforme(s, 'id_empresa', '0')} < {self.p.fornecedores!r}"
         ).selectExpr(
             "id_empresa AS _id_verdadeiro",
             f"{self.chave('fornecedores', 'id_empresa', 6)} AS codigo_fornecedor",
@@ -229,9 +207,9 @@ class _Projecao:
             self.calendario().crossJoin(self.fornecedores.select("_id_verdadeiro", "_cadastro"))
             .where("data > _cadastro")
             .withColumn("_exclui", F.expr(
-                f"{self.u('semente', '_id_verdadeiro', '1')} < {self.por_dia(self.p.exclusao_fornecedor_ao_ano)!r}"))
+                f"{uniforme('semente', '_id_verdadeiro', '1')} < {self.por_dia(self.p.exclusao_fornecedor_ao_ano)!r}"))
             .withColumn("_atualiza", F.expr(
-                f"{self.u('semente', '_id_verdadeiro', '2')} < {self.por_dia(self.p.atualizacao_fornecedor_ao_ano)!r}"))
+                f"{uniforme('semente', '_id_verdadeiro', '2')} < {self.por_dia(self.p.atualizacao_fornecedor_ao_ano)!r}"))
             .where("_exclui OR _atualiza")
             .withColumn("_exclusao", F.min(F.when(F.col("_exclui"), F.col("data"))).over(
                 Window.partitionBy("_id_verdadeiro")))
@@ -263,7 +241,7 @@ class _Projecao:
             .withColumn("telefone", F.coalesce(F.last("_novo_telefone", ignorenulls=True).over(janela), F.col("telefone")))
             .selectExpr(
                 "_id_verdadeiro", *imagem, "telefone",
-                f"{self.instante('data', self.p.horario_expediente, 'semente', '_id_verdadeiro', '5')} AS updated_at",
+                f"{instante('data', self.p.horario_expediente, 'semente', '_id_verdadeiro', '5')} AS updated_at",
                 "_excluido AS excluido",
             )
         )
@@ -299,35 +277,26 @@ class _Projecao:
         p, datas = self.p, self.roteiro.datas
         defasagem = p.prazo_vencimento_dias.maximo + p.dias_pagamento_apos_vencimento.maximo + 1 + self.defeitos.folga_dias()
         primeira = max(datas.inicio, inicio - timedelta(days=defasagem))
-        dias_historia = (datas.carga_inicial - datas.inicio).days + 1
-        por_dia = linhas_na_escala(p.titulos_pagar, self.contexto.escala) / dias_historia
-        inteiro, resto = int(por_dia), por_dia - int(por_dia)
-
-        def u(k: int) -> str:
-            return self.u("semente", "n", str(k))
-
+        inteiro, fracao = volume_por_dia(self.contexto, p.titulos_pagar)
         prazo, pagamento, valor = p.prazo_vencimento_dias, p.dias_pagamento_apos_vencimento, p.valor_titulo
         ativos = self.fornecedores_ativos
         totais = ativos.select("data", "_fornecedores").distinct()
         titulos = (
-            self.calendario().where(F.col("data") >= F.lit(primeira))
-            .withColumn("_n_dia", F.expr(f"{inteiro} + CASE WHEN {self.u('semente', '0')} < {resto!r} THEN 1 ELSE 0 END"))
-            .where("_n_dia > 0")
-            .select("data", "semente", F.explode(F.sequence(F.lit(1), F.col("_n_dia"))).alias("n"))
+            linhas_por_dia(self.calendario().where(F.col("data") >= F.lit(primeira)), inteiro, fracao)
             .join(totais, "data")
             .selectExpr(
                 "*",
                 "cast(date_format(data, 'yyyyMMdd') AS bigint) * 10000 + n AS id_titulo",
                 "pmod(xxhash64(semente, n, 1), _fornecedores) AS _indice_fornecedor",
-                f"{self.sorteio(p.empresas_titulos, u(2))} AS empresa",
-                f"{self.sorteio(p.categorias_despesa, u(3))} AS categoria",
-                f"cast(round({valor.minimo} + {valor.maximo - valor.minimo} * {u(4)}, 2) AS decimal(12,2)) AS valor",
+                f"{sorteio(p.empresas_titulos, uniforme_do_lote(2))} AS empresa",
+                f"{sorteio(p.categorias_despesa, uniforme_do_lote(3))} AS categoria",
+                f"cast(round({valor.minimo} + {valor.maximo - valor.minimo} * {uniforme_do_lote(4)}, 2) AS decimal(12,2)) AS valor",
                 "data AS data_emissao",
                 f"date_add(data, cast({prazo.minimo} + pmod(xxhash64(semente, n, 5), "
                 f"{prazo.maximo - prazo.minimo + 1}) AS int)) AS data_vencimento",
-                f"{self.instante('data', p.horario_expediente, 'semente', 'n', '6')} AS _emitido_em",
-                f"{u(7)} < {p.cancelamento_titulo!r} AS _cancelado",
-                f"{u(8)} AS _u_momento",
+                f"{instante('data', p.horario_expediente, 'semente', 'n', '6')} AS _emitido_em",
+                f"{uniforme_do_lote(7)} < {p.cancelamento_titulo!r} AS _cancelado",
+                f"{uniforme_do_lote(8)} AS _u_momento",
                 f"cast({pagamento.minimo} + pmod(xxhash64(semente, n, 9), "
                 f"{pagamento.maximo - pagamento.minimo + 1}) AS int) AS _dias_pagamento",
             )
@@ -351,7 +320,7 @@ class _Projecao:
             versao(titulos, "aberto", "NULL", "_emitido_em", False)
             .unionByName(versao(titulos.where("_cancelado"), "aberto", "NULL", cancelamento, True))
             .unionByName(versao(
-                pago, "pago", "_pago_em", self.instante("_pago_em", p.horario_expediente, "semente", "n", "10"), False))
+                pago, "pago", "_pago_em", instante("_pago_em", p.horario_expediente, "semente", "n", "10"), False))
         )
 
     # -- faturamento e ativos -----------------------------------------------------------------
@@ -388,7 +357,7 @@ class _Projecao:
             "_id_verdadeiro", "numero_nota", "empresa_vendedora AS empresa_emitente", "data_venda AS data_emissao",
             "tipo_comprador AS tipo_cliente", "documento_cliente", "nome_cliente", "descricao", "placa",
             "valor_venda AS valor_total",
-            f"{self.instante('data_venda', self.p.horario_expediente, s, '_id_verdadeiro')} AS updated_at",
+            f"{instante('data_venda', self.p.horario_expediente, s, '_id_verdadeiro')} AS updated_at",
             "false AS excluido",
         )
 
@@ -403,7 +372,7 @@ class _Projecao:
                   "valor_aquisicao"]
         aquisicao = frota.selectExpr(
             *imagem, "valor_aquisicao AS valor_contabil",
-            f"{self.instante('data_aquisicao', self.p.horario_expediente, s, '_id_verdadeiro')} AS updated_at",
+            f"{instante('data_aquisicao', self.p.horario_expediente, s, '_id_verdadeiro')} AS updated_at",
             "false AS excluido",
         )
         taxa_mes = self.p.depreciacao_ao_ano / 12
@@ -414,7 +383,7 @@ class _Projecao:
                 *imagem,
                 f"cast(greatest(round(valor_aquisicao * (1 - {taxa_mes!r} * "
                 "cast(months_between(data, last_day(data_aquisicao)) AS int)), 2), 0) AS decimal(14,2)) AS valor_contabil",
-                f"{self.instante('data', self.p.horario_expediente, 'semente', '_id_verdadeiro', '1')} AS updated_at",
+                f"{instante('data', self.p.horario_expediente, 'semente', '_id_verdadeiro', '1')} AS updated_at",
                 "false AS excluido",
             )
         )

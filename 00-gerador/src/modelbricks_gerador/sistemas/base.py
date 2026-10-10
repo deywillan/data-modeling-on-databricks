@@ -16,8 +16,9 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from ..escritor import Arquivo
-from ..mundo import Mundo, gerar_mundo
-from ..roteiro import Fatia, Roteiro
+from ..expressoes import inteiro_e_fracao, uniforme
+from ..mundo import Mundo, gerar_mundo, linhas as linhas_na_escala
+from ..roteiro import Fatia, FormatoDeEntrega, Roteiro
 from ..sementes import semente
 
 if TYPE_CHECKING:
@@ -73,7 +74,7 @@ class Lote:
     sistema: str
     entidade: str
     data_simulada: date  # dia em que o sistema entregou o lote
-    formato: str  # json, json_aninhado, parquet, csv, csv_latin1
+    formato: FormatoDeEntrega
     registros: int  # linhas (ou operações) no arquivo
     arquivo: Arquivo
 
@@ -118,6 +119,29 @@ def calendario(contexto: Contexto, sistema: str, fim: date) -> "DataFrame":
     )
 
 
+def volume_por_dia(contexto: Contexto, volume: float) -> tuple[int, float]:
+    """Linhas por dia (parte inteira e fração) para que a história inteira (do início à carga
+    inicial) some `volume` linhas na escala 1. Um dia gera a parte inteira mais uma linha
+    com probabilidade igual à fração (ver `linhas_por_dia`)."""
+    datas = contexto.roteiro.datas
+    dias_historia = (datas.carga_inicial - datas.inicio).days + 1
+    return inteiro_e_fracao(linhas_na_escala(volume, contexto.escala) / dias_historia)
+
+
+def linhas_por_dia(dias: "DataFrame", inteiro: int, fracao: float, *manter: str) -> "DataFrame":
+    """Uma linha por fato do dia: `dias` (com `data` e `semente`) vira `data`, `semente`,
+    as colunas `manter` e `n` (1 a N, sequencial do fato no dia). N é `inteiro` mais 1 com
+    probabilidade `fracao`, sorteada pela semente do dia; dias com N = 0 somem."""
+    from pyspark.sql import functions as F
+
+    return (
+        dias
+        .withColumn("_n_dia", F.expr(f"{inteiro} + CASE WHEN {uniforme('semente', 0)} < {fracao!r} THEN 1 ELSE 0 END"))
+        .where("_n_dia > 0")
+        .select("data", "semente", *manter, F.explode(F.sequence(F.lit(1), F.col("_n_dia"))).alias("n"))
+    )
+
+
 def materializar(contexto: Contexto, df: "DataFrame") -> "DataFrame":
     """Calcula `df` uma vez e o devolve como relação local (via Arrow).
 
@@ -130,4 +154,6 @@ def materializar(contexto: Contexto, df: "DataFrame") -> "DataFrame":
     return contexto.spark.createDataFrame(tabela)
 
 
-__all__ = ["Contexto", "Entrega", "Lote", "calendario", "materializar", "semente_do_lote"]
+__all__ = [
+    "Contexto", "Entrega", "Lote", "calendario", "linhas_por_dia", "materializar", "semente_do_lote", "volume_por_dia",
+]

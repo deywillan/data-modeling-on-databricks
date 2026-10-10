@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from .chaves import COLUNAS_MAPA
 from .defeitos import COLUNAS_DEFEITOS, ESQUEMA
 from .destino import Destino
-from .relogio import Relogio, gravar_relogio, ler_relogio
+from .relogio import Relogio, conferir_relogio, gravar_relogio, ler_relogio
 from .roteiro import Roteiro, carregar_roteiro
 from .sistemas import PROJECOES, Contexto, Entrega
 
@@ -54,8 +54,12 @@ def gerar_fatia(
 
     Cria os schemas `landing` (com Volume), `bronze`, `silver`, `gold` e, se a fatia pedir,
     `gabarito`; só a landing (e o gabarito) recebem dados. Se o relógio já existir, não
-    altera nada e informa a data atual; com `reset=True`, recria o ambiente do zero.
+    altera nada e informa a data atual (mas levanta `RelogioIncompativel` se ele foi gravado com
+    outra versão do roteiro ou outra escala); com `reset=True`, recria o ambiente do zero.
     `ate` padrão: `datas.carga_inicial` do roteiro. `roteiro` aceita um caminho alternativo.
+
+    Se a chamada cair no meio, basta repeti-la: arquivo já gravado com os mesmos bytes conta
+    como entregue (bytes diferentes continuam sendo erro) e o relógio só é gravado no fim.
     """
     roteiro = _roteiro(roteiro)
     fatia = roteiro.fatia(artigo)
@@ -70,6 +74,7 @@ def gerar_fatia(
 
     relogio = ler_relogio(destino)
     if relogio is not None:
+        conferir_relogio(relogio, roteiro.versao, float(escala))
         return _concluir(
             Resultado(
                 artigo, relogio.data_simulada, False, 0,
@@ -105,7 +110,12 @@ def avancar_tempo(
     roteiro: Roteiro | str | Path | None = None,
 ) -> Resultado:
     """Gera os lotes de `relógio+1` até `relógio+dias` da fatia, grava só arquivos novos e
-    avança o relógio. Exige a carga inicial (`gerar_fatia`) feita no mesmo destino."""
+    avança o relógio. Exige a carga inicial (`gerar_fatia`) feita no mesmo destino, com a mesma
+    versão do roteiro (senão levanta `RelogioIncompativel`).
+
+    Se a chamada cair no meio, basta repeti-la: o relógio só avança no fim, os arquivos já
+    gravados com os mesmos bytes contam como entregues e o gabarito do intervalo é regravado
+    sem duplicar."""
     roteiro = _roteiro(roteiro)
     fatia = roteiro.fatia(artigo)
     if dias < 1:
@@ -115,6 +125,7 @@ def avancar_tempo(
         raise RuntimeError(f"{artigo}: o destino não tem relógio. Rode gerar_fatia antes de avancar_tempo.")
     if relogio.artigo != artigo:
         raise RuntimeError(f"O destino pertence ao artigo {relogio.artigo}, não a {artigo}.")
+    conferir_relogio(relogio, roteiro.versao)
 
     inicio = relogio.data_simulada + timedelta(days=1)
     fim = relogio.data_simulada + timedelta(days=dias)
@@ -122,6 +133,9 @@ def avancar_tempo(
     entregas, arquivos = _projetar(contexto, inicio, fim, destino)
     if fatia.gabarito:
         _gravar_mapa_chaves(entregas, destino)
+        # Uma tentativa anterior pode ter acrescentado os defeitos deste intervalo e caído antes do
+        # relógio: apaga as linhas do intervalo para a nova tentativa não duplicá-las.
+        destino.apagar_do_gabarito(TABELA_DEFEITOS, "data_entrega", inicio)
         _gravar_defeitos(contexto, entregas, destino, acrescentar=True)
     gravar_relogio(destino, Relogio(fim, artigo, relogio.escala, roteiro.versao))
     return _concluir(

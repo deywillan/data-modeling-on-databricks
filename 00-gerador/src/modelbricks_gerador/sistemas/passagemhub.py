@@ -39,9 +39,9 @@ from typing import TYPE_CHECKING
 from ..chaves import chave_do_sistema, mapa
 from ..defeitos import Alvo, Defeitos, registros, tabela_de_registros
 from ..escritor import Arquivo, caminho_landing
-from ..mundo import linhas as linhas_na_escala
+from ..expressoes import instante, sorteio, uniforme_do_lote
 from ..sementes import semente
-from .base import Contexto, Entrega, Lote, calendario, materializar
+from .base import Contexto, Entrega, Lote, calendario, linhas_por_dia, materializar, volume_por_dia
 
 if TYPE_CHECKING:
     from pyspark.sql import Column, DataFrame
@@ -255,43 +255,28 @@ class _Projecao:
         primeira_venda = max(datas.inicio, inicio - timedelta(days=p.antecedencia_compra_dias.maximo + 1))
 
         # Pedidos por dia: a parte do marketplace no volume do roteiro, dividida pelos dias.
-        dias_historia = (datas.carga_inicial - datas.inicio).days + 1
-        fracao = 1 - self.roteiro.parametros.embarque.fracao_passagens
-        por_dia = linhas_na_escala(self.roteiro.volumes.passagens_embarque_passagemhub * fracao,
-                                   self.contexto.escala) / dias_historia
-        inteiro, resto = int(por_dia), por_dia - int(por_dia)
+        parte_marketplace = 1 - self.roteiro.parametros.embarque.fracao_passagens
+        inteiro, fracao = volume_por_dia(
+            self.contexto, self.roteiro.volumes.passagens_embarque_passagemhub * parte_marketplace)
 
         # Clientes elegíveis num dia: os cadastrados até ele, numerados por ordem de cadastro.
         clientes = self.clientes.select(
             "*", (F.row_number().over(Window.orderBy("data_cadastro", "id_cliente")) - 1).alias("_indice_cliente"),
         )
         cadastros = clientes.groupBy(F.col("data_cadastro").alias("data")).agg(F.count(F.lit(1)).alias("_novos"))
-        dias = (
+        dias = linhas_por_dia(
             calendario(self.contexto, SISTEMA, self.fim)
             .join(cadastros, "data", "left")
             .withColumn("_clientes", F.sum(F.coalesce("_novos", F.lit(0))).over(
                 Window.orderBy("data").rowsBetween(Window.unboundedPreceding, Window.currentRow)))
             .where(F.col("data") >= F.lit(primeira_venda))
-            .where("_clientes > 0")
-            .withColumn("_n_dia", F.expr(
-                f"{inteiro} + CASE WHEN pmod(xxhash64(semente, 0), 1000000) / 1000000.0 < {resto!r} THEN 1 ELSE 0 END"))
-            .where("_n_dia > 0")
-            .select("data", "semente", "_clientes", F.explode(F.sequence(F.lit(1), F.col("_n_dia"))).alias("n"))
+            .where("_clientes > 0"),
+            inteiro, fracao, "_clientes",
         )
         trechos = self.trechos.select(
             "*", (F.row_number().over(Window.orderBy("cod_trecho")) - 1).alias("_indice_trecho"),
         )
         total_trechos = trechos.agg(F.count(F.lit(1)).alias("_trechos"))
-
-        def u(k: int) -> str:
-            return f"(pmod(xxhash64(semente, n, {k}), 1000000) / 1000000.0)"
-
-        def sorteio(pesos: dict[str, float], k: int) -> str:
-            nomes, total, acumulado, casos = sorted(pesos), sum(pesos.values()), 0.0, []
-            for nome in nomes[:-1]:
-                acumulado += pesos[nome] / total
-                casos.append(f"WHEN {u(k)} < {acumulado!r} THEN '{nome}'")
-            return f"CASE {' '.join(casos)} ELSE '{nomes[-1]}' END" if casos else f"'{nomes[-1]}'"
 
         horas, antecedencia, adiamento, parcelas = (
             p.horario_vendas, p.antecedencia_compra_dias, p.adiamento_remarcacao_dias, p.parcelas_cartao,
@@ -300,8 +285,8 @@ class _Projecao:
         limite_remarcacao = limite_cancelamento + p.remarcacao
         destino = (
             f"CASE WHEN _antecedencia = 0 THEN 'normal' "
-            f"WHEN {u(7)} < {limite_cancelamento!r} THEN 'cancelada' "
-            f"WHEN {u(7)} < {limite_remarcacao!r} THEN 'remarcada' ELSE 'normal' END"
+            f"WHEN {uniforme_do_lote(7)} < {limite_cancelamento!r} THEN 'cancelada' "
+            f"WHEN {uniforme_do_lote(7)} < {limite_remarcacao!r} THEN 'remarcada' ELSE 'normal' END"
         )
         reajuste = self.reajuste.data.isoformat()
 
@@ -312,16 +297,15 @@ class _Projecao:
                 "concat('PH', date_format(data, 'yyyyMMdd'), lpad(cast(n AS string), 6, '0')) AS codigo_pedido",
                 "pmod(xxhash64(semente, n, 1), _clientes) AS _indice_cliente",
                 "pmod(xxhash64(semente, n, 2), _trechos) AS _indice_trecho",
-                f"timestamp_seconds(unix_seconds(cast(data AS timestamp)) + {horas.minimo * 3600} "
-                f"+ pmod(xxhash64(semente, n, 3), {(horas.maximo - horas.minimo) * 3600})) AS criado_em",
+                f"{instante('data', horas, 'semente', 'n', 3)} AS criado_em",
                 f"{antecedencia.minimo} + pmod(xxhash64(semente, n, 4), "
                 f"{antecedencia.maximo - antecedencia.minimo + 1}) AS _antecedencia",
-                f"{sorteio(p.canais, 5)} AS canal",
+                f"{sorteio(p.canais, uniforme_do_lote(5))} AS canal",
                 f"cast(1 + pmod(xxhash64(semente, n, 6), {p.poltronas}) AS int) AS poltrona",
                 f"cast({adiamento.minimo} + pmod(xxhash64(semente, n, 8), "
                 f"{adiamento.maximo - adiamento.minimo + 1}) AS int) AS _adiamento",
-                f"{u(9)} AS _u_momento",
-                f"{sorteio(p.formas_pagamento, 10)} AS forma_pagamento",
+                f"{uniforme_do_lote(9)} AS _u_momento",
+                f"{sorteio(p.formas_pagamento, uniforme_do_lote(10))} AS forma_pagamento",
             )
             .withColumn("data_viagem", F.expr("date_add(data, cast(_antecedencia AS int))"))
             .withColumn("_destino", F.expr(destino))

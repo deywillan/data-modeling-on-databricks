@@ -39,6 +39,7 @@ from datetime import date
 from importlib import resources
 from typing import TYPE_CHECKING
 
+from .expressoes import uniforme
 from .roteiro import Roteiro
 from .sementes import semente
 
@@ -162,7 +163,7 @@ class _Gerador:
 
     def sorteio(self, nome: str, coluna_id: str) -> str:
         """Expressão SQL uniforme em [0, 1), determinística por (nome, id)."""
-        return f"(pmod(xxhash64({self.semente(nome)}, {coluna_id}), 1000000) / 1000000.0)"
+        return uniforme(self.semente(nome), coluna_id)
 
     def pool(self, provedor: str) -> list[str]:
         """Valores distintos do Faker pt_BR (gerados no driver), só os representáveis em latin1."""
@@ -232,11 +233,11 @@ class _Gerador:
 
     # -- tabelas do plano ----------------------------------------------------------------
 
-    def tabela(self, nome: str, linhas_: int, colunas: list) -> object:
+    def tabela(self, nome: str, quantidade: int, colunas: list) -> object:
         from dbldatagen.core import PrimaryKey, TableSpec
 
         return TableSpec(
-            name=nome, rows=linhas_, seed=self.semente("tabela", nome),
+            name=nome, rows=quantidade, seed=self.semente("tabela", nome),
             primary_key=PrimaryKey(columns=[colunas[0].name]), columns=colunas,
         )
 
@@ -545,7 +546,7 @@ class _Municipios:
     codigos_atuacao: list[int]
 
 
-def _sortear(origem, chave_origem: str, candidatos, id_candidato: str, saida: str, semente_: int):
+def _sortear(origem, chave_origem: str, candidatos, id_candidato: str, saida: str, semente_do_sorteio: int):
     """Para cada linha da origem, sorteia (uniforme e determinístico) um id dos candidatos.
 
     Sem candidatos, a coluna de saída fica nula.
@@ -561,7 +562,7 @@ def _sortear(origem, chave_origem: str, candidatos, id_candidato: str, saida: st
     )
     total = candidatos.agg(F.count(F.lit(1)).alias("_total"))
     sorteada = origem.crossJoin(total).withColumn(
-        "_indice", F.expr(f"pmod(xxhash64({semente_}, {chave_origem}), greatest(_total, 1))")
+        "_indice", F.expr(f"pmod(xxhash64({semente_do_sorteio}, {chave_origem}), greatest(_total, 1))")
     )
     return sorteada.join(indexados, "_indice", "left").drop("_indice", "_total")
 

@@ -1,10 +1,17 @@
 """`gerar_fatia` gravando no Unity Catalog (`DestinoUC`), conferido por SQL no workspace.
 
-Usa um catálogo de teste próprio, removido no início e no fim da sessão de testes. O que se
-testa é onde o destino grava, não a geração dos sistemas: a fatia 01-bronze é reduzida ao
-IBGE, o que poupa a geração e o envio de milhares de arquivos ao Volume. Marcado como
-`lento` porque cria e apaga um catálogo no workspace.
+Cada execução da sessão usa um catálogo de teste com sufixo próprio (`_t` + 8 hexadecimais
+aleatórios), para que duas execuções simultâneas (ou uma que morreu no meio) nunca disputem o
+mesmo catálogo. Ele só é removido no fim, com `try/finally`; nada é apagado antes, porque o
+nome é novo. A carga inicial roda uma vez, numa fixture do módulo, e cada teste parte dela:
+uma falha num teste não derruba os outros em cascata. O que se testa é onde o destino grava,
+não a geração dos sistemas: a fatia 01-bronze é reduzida ao IBGE, o que poupa a geração e o
+envio de milhares de arquivos ao Volume. Marcado como `lento` porque cria e apaga um catálogo
+no workspace.
 """
+
+import re
+import uuid
 
 import geracoes
 import pytest
@@ -14,30 +21,48 @@ from modelbricks_gerador.escritor import Arquivo
 
 pytestmark = pytest.mark.lento
 
-CATALOGO = "medalhao_01_bronze_t02"
 SO_IBGE = geracoes.roteiro_so_ibge()
+_SUFIXO_VALIDO = re.compile(r"[a-z0-9_]*")  # o mesmo que `cli._sufixo` aceita
 
 
-def _apagar_catalogo(spark):
-    spark.sql(f"DROP CATALOG IF EXISTS {CATALOGO} CASCADE")
+@pytest.fixture(scope="session")
+def sufixo_catalogo() -> str:
+    """Sufixo único desta execução da sessão de testes."""
+    sufixo = f"_t{uuid.uuid4().hex[:8]}"
+    assert _SUFIXO_VALIDO.fullmatch(sufixo)
+    return sufixo
 
 
 @pytest.fixture(scope="module")
-def destino_uc(spark):
-    _apagar_catalogo(spark)
-    yield DestinoUC(CATALOGO, spark=spark)
-    _apagar_catalogo(spark)
+def catalogo(spark, sufixo_catalogo):
+    """Catálogo de teste desta execução, apagado só no fim."""
+    nome = f"medalhao_01_bronze{sufixo_catalogo}"
+    try:
+        yield nome
+    finally:
+        spark.sql(f"DROP CATALOG IF EXISTS {nome} CASCADE")
 
 
-def _schemas(spark) -> set[str]:
-    return {linha[0] for linha in spark.sql(f"SHOW SCHEMAS IN {CATALOGO}").collect()}
+@pytest.fixture(scope="module")
+def destino_uc(spark, catalogo):
+    return DestinoUC(catalogo, spark=spark)
 
 
-def _tabelas(spark, schema: str) -> list[str]:
-    return [linha["tableName"] for linha in spark.sql(f"SHOW TABLES IN {CATALOGO}.{schema}").collect()]
+@pytest.fixture(scope="module")
+def carga_inicial(spark, destino_uc):
+    """A carga inicial da fatia, feita uma vez; os testes partem do que ela deixou."""
+    return gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
 
 
-def _arquivos_landing() -> list[tuple[str, int, int | None]]:
+def _schemas(spark, catalogo) -> set[str]:
+    return {linha[0] for linha in spark.sql(f"SHOW SCHEMAS IN {catalogo}").collect()}
+
+
+def _tabelas(spark, catalogo, schema: str) -> list[str]:
+    return [linha["tableName"] for linha in spark.sql(f"SHOW TABLES IN {catalogo}.{schema}").collect()]
+
+
+def _arquivos_landing(catalogo) -> list[tuple[str, int, int | None]]:
     """(caminho, tamanho, última modificação) de todos os arquivos do Volume landing.
 
     Lista pelo SDK, e não por `read_files`, porque o Spark ignora pastas iniciadas por `_`.
@@ -45,7 +70,7 @@ def _arquivos_landing() -> list[tuple[str, int, int | None]]:
     from databricks.sdk import WorkspaceClient
 
     w = WorkspaceClient()
-    arquivos, pendentes = [], [f"/Volumes/{CATALOGO}/landing/landing"]
+    arquivos, pendentes = [], [f"/Volumes/{catalogo}/landing/landing"]
     while pendentes:
         for item in w.files.list_directory_contents(pendentes.pop()):
             if item.is_directory:
@@ -55,39 +80,37 @@ def _arquivos_landing() -> list[tuple[str, int, int | None]]:
     return sorted(arquivos)
 
 
-def test_carga_inicial_cria_catalogo_schemas_volume_ibge_e_relogio(spark, destino_uc):
-    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
-
-    assert resultado.gerou
-    assert {"landing", "bronze", "silver", "gold"} <= _schemas(spark)
-    volumes = [linha["volume_name"] for linha in spark.sql(f"SHOW VOLUMES IN {CATALOGO}.landing").collect()]
+def test_carga_inicial_cria_catalogo_schemas_volume_ibge_e_relogio(spark, catalogo, carga_inicial):
+    assert carga_inicial.gerou
+    assert {"landing", "bronze", "silver", "gold"} <= _schemas(spark, catalogo)
+    volumes = [linha["volume_name"] for linha in spark.sql(f"SHOW VOLUMES IN {catalogo}.landing").collect()]
     assert volumes == ["landing"]
     for schema in ("bronze", "silver", "gold"):
-        assert _tabelas(spark, schema) == [], f"o gerador escreveu em {schema}"
+        assert _tabelas(spark, catalogo, schema) == [], f"o gerador escreveu em {schema}"
 
-    caminhos = [arquivo[0] for arquivo in _arquivos_landing()]
+    caminhos = [arquivo[0] for arquivo in _arquivos_landing(catalogo)]
     assert any(c.endswith("/ibge/municipios/2025-12-31/municipios_20251231_0001.csv") for c in caminhos)
     assert any(c.endswith("/_controle/relogio/2025-12-31.json") for c in caminhos)
 
     municipios = spark.sql(
         f"SELECT count(*) AS n, count_if(nome_municipio = 'São Paulo') AS sp FROM read_files("
-        f"'/Volumes/{CATALOGO}/landing/landing/ibge/municipios/', format => 'csv', header => true)"
+        f"'/Volumes/{catalogo}/landing/landing/ibge/municipios/', format => 'csv', header => true)"
     ).first()
     assert municipios["n"] == 5571
     assert municipios["sp"] == 1
 
 
-def test_reexecutar_sem_reset_nao_altera_nada(spark, destino_uc):
-    antes = _arquivos_landing()
+def test_reexecutar_sem_reset_nao_altera_nada(spark, catalogo, destino_uc, carga_inicial):
+    antes = _arquivos_landing(catalogo)
 
     resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
 
     assert not resultado.gerou
     assert "31/12/2025" in resultado.mensagem
-    assert _arquivos_landing() == antes
+    assert _arquivos_landing(catalogo) == antes
 
 
-def test_landing_nunca_sobrescreve(destino_uc):
+def test_landing_nunca_sobrescreve(destino_uc, carga_inicial):
     caminho = "ibge/municipios/2025-12-31/municipios_20251231_0001.csv"
 
     with pytest.raises(ArquivoJaExiste):
@@ -96,12 +119,35 @@ def test_landing_nunca_sobrescreve(destino_uc):
     assert destino_uc.ler(caminho).startswith(b"cod_municipio,nome_municipio")
 
 
-def test_reset_recria_o_catalogo_do_zero(spark, destino_uc):
-    antes = [arquivo[:2] for arquivo in _arquivos_landing()]
-    spark.sql(f"CREATE TABLE {CATALOGO}.bronze.sobra_de_execucao_anterior (id INT)")
+def test_arquivo_ja_gravado_com_os_mesmos_bytes_conta_como_gravado(destino_uc, carga_inicial):
+    caminho = "ibge/municipios/2025-12-31/municipios_20251231_0001.csv"
+    conteudo = destino_uc.ler(caminho)
+
+    destino_uc.gravar_arquivos([Arquivo(caminho, conteudo)])  # nova tentativa de uma chamada que caiu
+
+    assert destino_uc.ler(caminho) == conteudo
+
+
+def test_apagar_do_gabarito_remove_so_as_linhas_a_partir_da_data(spark, destino_uc, carga_inicial):
+    from datetime import date
+
+    destino_uc.preparar(("gabarito",))
+    linhas = [(date(2026, 1, 1), "antes"), (date(2026, 1, 2), "no_dia"), (date(2026, 1, 3), "depois"), (None, "sem_data")]
+    destino_uc.gravar_gabarito("defeitos_de_teste", spark.createDataFrame(linhas, "data_entrega date, rotulo string"))
+
+    destino_uc.apagar_do_gabarito("defeitos_de_teste", "data_entrega", date(2026, 1, 2))
+    destino_uc.apagar_do_gabarito("tabela_que_nao_existe", "data_entrega", date(2026, 1, 2))  # não faz nada
+
+    restantes = spark.table(f"{destino_uc.schema('gabarito')}.defeitos_de_teste").collect()
+    assert sorted(r["rotulo"] for r in restantes) == ["antes", "sem_data"]
+
+
+def test_reset_recria_o_catalogo_do_zero(spark, catalogo, destino_uc, carga_inicial):
+    antes = [arquivo[:2] for arquivo in _arquivos_landing(catalogo)]
+    spark.sql(f"CREATE TABLE {catalogo}.bronze.sobra_de_execucao_anterior (id INT)")
 
     resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, reset=True, roteiro=SO_IBGE)
 
     assert resultado.gerou
-    assert _tabelas(spark, "bronze") == []
-    assert [arquivo[:2] for arquivo in _arquivos_landing()] == antes
+    assert _tabelas(spark, catalogo, "bronze") == []
+    assert [arquivo[:2] for arquivo in _arquivos_landing(catalogo)] == antes

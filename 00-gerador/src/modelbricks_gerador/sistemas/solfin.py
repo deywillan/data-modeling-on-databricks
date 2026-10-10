@@ -22,9 +22,10 @@ from typing import TYPE_CHECKING
 
 from ..cdc import Mudancas
 from ..chaves import chave_do_sistema, mapa
+from ..expressoes import instante, sorteio, uniforme, uniforme_do_lote
 from ..sementes import semente
 from . import legados
-from .base import Contexto, Entrega, calendario, materializar
+from .base import Contexto, Entrega, calendario, linhas_por_dia, materializar
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -57,18 +58,14 @@ class _Projecao:
 
     def instante(self, data: str, *colunas: str) -> str:
         """Timestamp no expediente do dia `data`, sorteado pelas colunas."""
-        h = self.p.horario_expediente
-        return (
-            f"timestamp_seconds(unix_seconds(cast({data} AS timestamp)) + {h.minimo * 3600} "
-            f"+ pmod(xxhash64({', '.join(colunas)}), {(h.maximo - h.minimo) * 3600}))"
-        )
+        return instante(data, self.p.horario_expediente, *colunas)
 
     @cached_property
     def fornecedores(self) -> "DataFrame":
         """Empresas PJ do mundo que fornecem ao Vale do Sol."""
         s = semente(self.roteiro.seed_base, SISTEMA, "fornecedores")
         return materializar(self.contexto, self.contexto.mundo["empresas_pj"].where(
-            f"pmod(xxhash64({s}, id_empresa), 1000000) / 1000000.0 < {self.p.fornecedores!r}"
+            f"{uniforme(s, 'id_empresa')} < {self.p.fornecedores!r}"
         ).selectExpr(
             "cast(id_empresa AS bigint) AS _id_verdadeiro",
             f"{self.chave('fornecedores', 'id_empresa', 5)} AS cod_fornecedor",
@@ -97,24 +94,17 @@ class _Projecao:
         )
         total = fornecedores.agg(F.count(F.lit(1)).alias("_fornecedores"))
 
-        def u(k: int) -> str:
-            return f"(pmod(xxhash64(semente, n, {k}), 1000000) / 1000000.0)"
-
         prazo, pagamento, valor = p.prazo_vencimento_dias, p.dias_pagamento_apos_vencimento, p.valor_titulo
         titulos = (
-            calendario(self.contexto, SISTEMA, self.fim)
-            .withColumn("_n_dia", F.expr(
-                f"{inteiro} + CASE WHEN pmod(xxhash64(semente, 0), 1000000) / 1000000.0 < {fracao!r} THEN 1 ELSE 0 END"))
-            .where("_n_dia > 0")
-            .select("data", "semente", F.explode(F.sequence(F.lit(1), F.col("_n_dia"))).alias("n"))
+            linhas_por_dia(calendario(self.contexto, SISTEMA, self.fim), inteiro, fracao)
             .crossJoin(total)
             .where("_fornecedores > 0")
             .selectExpr(
                 "*",
                 "cast(date_format(data, 'yyyyMMdd') AS bigint) * 10000 + n AS num_titulo",
                 "pmod(xxhash64(semente, n, 1), _fornecedores) AS _indice_fornecedor",
-                f"{legados.sorteio(p.categorias_despesa, u(2))} AS categoria",
-                f"cast(round({valor.minimo} + {valor.maximo - valor.minimo} * {u(3)}, 2) AS decimal(12,2)) AS valor",
+                f"{sorteio(p.categorias_despesa, uniforme_do_lote(2))} AS categoria",
+                f"cast(round({valor.minimo} + {valor.maximo - valor.minimo} * {uniforme_do_lote(3)}, 2) AS decimal(12,2)) AS valor",
                 "data AS data_emissao",
                 f"date_add(data, cast({prazo.minimo} + pmod(xxhash64(semente, n, 4), "
                 f"{prazo.maximo - prazo.minimo + 1}) AS int)) AS data_vencimento",

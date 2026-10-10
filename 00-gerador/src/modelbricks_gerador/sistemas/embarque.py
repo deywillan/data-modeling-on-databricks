@@ -29,8 +29,8 @@ from dataclasses import replace
 from ..cdc import Mudancas, entrega_cdc
 from ..chaves import chave_do_sistema, mapa
 from ..defeitos import Alvo, Defeitos
-from ..mundo import linhas as linhas_na_escala
-from .base import Contexto, Entrega, calendario, materializar
+from ..expressoes import instante, sorteio, uniforme_do_lote
+from .base import Contexto, Entrega, calendario, linhas_por_dia, materializar, volume_por_dia
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
@@ -99,21 +99,32 @@ class _Projecao:
         percentual = self.reajuste.parametros["percentual"]
         return f"cast(round({coluna} * (1 + {percentual!r}), 2) AS decimal(10,2))"
 
+    @property
+    def alvo_clientes(self) -> Alvo:
+        return Alvo("clientes", ("id_cliente",), "pessoas", "_id_verdadeiro")
+
+    def chave_da_copia(self, coluna_id: str) -> str:
+        """Chave do sistema da cópia duplicada de um cliente (id verdadeiro deslocado para fora do mundo)."""
+        return self.chave("clientes", f"({coluna_id} + {_FORA_DO_MUNDO_CLIENTES})", 8)
+
     def mapa_chaves(self) -> "DataFrame":
-        linhas_ = self.linhas
+        """Mapa acumulado: todos os clientes, as cópias duplicadas deles e as linhas/tarifas."""
+        linhas = self.linhas
+        copias = self.defeitos.copias_de_pessoas(
+            self.clientes, self.alvo_clientes, {"id_cliente": self.chave_da_copia("id_pessoa")})
         return (
             mapa(self.clientes, SISTEMA, "clientes", "id_cliente", "pessoas", "id_pessoa")
-            .unionByName(mapa(linhas_, SISTEMA, "tarifas", "id_tarifa", "rotas", "id_rota"))
-            .unionByName(mapa(linhas_, SISTEMA, "tarifas", "cod_linha", "rotas", "id_rota"))
+            .unionByName(mapa(copias, SISTEMA, "clientes", "id_cliente", "pessoas", "id_pessoa"))
+            .unionByName(mapa(linhas, SISTEMA, "tarifas", "id_tarifa", "rotas", "id_rota"))
+            .unionByName(mapa(linhas, SISTEMA, "tarifas", "cod_linha", "rotas", "id_rota"))
         )
 
     # -- defeitos ---------------------------------------------------------------------------
 
     def sujar_clientes(self, df: "DataFrame") -> "DataFrame":
         d = self.defeitos
-        alvo = Alvo("clientes", ("id_cliente",), "pessoas", "_id_verdadeiro")
-        copia = self.chave("clientes", f"(_id_verdadeiro + {_FORA_DO_MUNDO_CLIENTES})", 8)
-        df = d.pessoa_duplicada_no_sistema(df, alvo, {"id_cliente": copia})
+        alvo = self.alvo_clientes
+        df = d.pessoa_duplicada_no_sistema(df, alvo, {"id_cliente": self.chave_da_copia("_id_verdadeiro")})
         df = d.cpf_fora_do_padrao(df, alvo, "cpf")
         df = d.nome_abreviado_ou_com_erro(df, alvo, "nome")
         df = d.contato_nulo(df, alvo, ("email", "telefone"))
@@ -211,10 +222,8 @@ class _Projecao:
         primeira_venda = max(datas.inicio, inicio - timedelta(days=defasagem))
 
         # Passagens por dia: o volume do roteiro dividido pelos dias da história.
-        dias_historia = (datas.carga_inicial - datas.inicio).days + 1
-        por_dia = linhas_na_escala(self.roteiro.volumes.passagens_embarque_passagemhub * p.fracao_passagens,
-                         self.contexto.escala) / dias_historia
-        inteiro, fracao = int(por_dia), por_dia - int(por_dia)
+        inteiro, fracao = volume_por_dia(
+            self.contexto, self.roteiro.volumes.passagens_embarque_passagemhub * p.fracao_passagens)
 
         # Clientes elegíveis num dia: os cadastrados até ele, numerados por ordem de cadastro.
         clientes = self.clientes.select(
@@ -222,46 +231,34 @@ class _Projecao:
             (F.row_number().over(Window.orderBy("data_cadastro", "id_cliente")) - 1).alias("_indice_cliente"),
         )
         cadastros = clientes.groupBy(F.col("data_cadastro").alias("data")).agg(F.count(F.lit(1)).alias("_novos"))
-        dias = (
+        dias = linhas_por_dia(
             calendario(self.contexto, SISTEMA, self.fim)
             .join(cadastros, "data", "left")
             .withColumn("_clientes", F.sum(F.coalesce("_novos", F.lit(0))).over(
                 Window.orderBy("data").rowsBetween(Window.unboundedPreceding, Window.currentRow)))
             .where(F.col("data") >= F.lit(primeira_venda))
-            .where("_clientes > 0")
-            .withColumn("_n_dia", F.expr(
-                f"{inteiro} + CASE WHEN pmod(xxhash64(semente, 0), 1000000) / 1000000.0 < {fracao!r} THEN 1 ELSE 0 END"))
-            .where("_n_dia > 0")
-            .select("data", "semente", "_clientes", F.explode(F.sequence(F.lit(1), F.col("_n_dia"))).alias("n"))
+            .where("_clientes > 0"),
+            inteiro, fracao, "_clientes",
         )
 
-        linhas_ = self.linhas.select(
+        linhas_numeradas = self.linhas.select(
             "cod_linha", "tarifa_base", "tarifa_reajustada",
             (F.row_number().over(Window.orderBy("cod_linha")) - 1).alias("_indice_linha"),
         )
-        total_linhas = linhas_.agg(F.count(F.lit(1)).alias("_linhas"))
-
-        def u(k: int) -> str:
-            return f"(pmod(xxhash64(semente, n, {k}), 1000000) / 1000000.0)"
+        total_linhas = linhas_numeradas.agg(F.count(F.lit(1)).alias("_linhas"))
 
         horas = p.horario_vendas
         antecedencia = p.antecedencia_compra_dias
         adiamento = p.adiamento_remarcacao_dias
-        canais = sorted(p.canais)
-        total_pesos = sum(p.canais.values())
-        acumulado, casos = 0.0, []
-        for canal in canais[:-1]:
-            acumulado += p.canais[canal] / total_pesos
-            casos.append(f"WHEN {u(5)} < {acumulado!r} THEN '{canal}'")
-        canal = f"CASE {' '.join(casos)} ELSE '{canais[-1]}' END" if casos else f"'{canais[-1]}'"
+        canal = sorteio(p.canais, uniforme_do_lote(5))
         limite_estorno = p.estorno
         limite_cancelamento = limite_estorno + p.cancelamento
         limite_remarcacao = limite_cancelamento + p.remarcacao
         destino = (
-            f"CASE WHEN {u(7)} < {limite_estorno!r} THEN 'estornada' "
+            f"CASE WHEN {uniforme_do_lote(7)} < {limite_estorno!r} THEN 'estornada' "
             f"WHEN _antecedencia = 0 THEN 'normal' "
-            f"WHEN {u(7)} < {limite_cancelamento!r} THEN 'cancelada' "
-            f"WHEN {u(7)} < {limite_remarcacao!r} THEN 'remarcada' ELSE 'normal' END"
+            f"WHEN {uniforme_do_lote(7)} < {limite_cancelamento!r} THEN 'cancelada' "
+            f"WHEN {uniforme_do_lote(7)} < {limite_remarcacao!r} THEN 'remarcada' ELSE 'normal' END"
         )
         reajuste = self.reajuste.data.isoformat()
 
@@ -272,20 +269,19 @@ class _Projecao:
                 "cast(date_format(data, 'yyyyMMdd') AS bigint) * 100000 + n AS id_passagem",
                 "pmod(xxhash64(semente, n, 1), _clientes) AS _indice_cliente",
                 "pmod(xxhash64(semente, n, 2), _linhas) AS _indice_linha",
-                f"timestamp_seconds(unix_seconds(cast(data AS timestamp)) + {horas.minimo * 3600} "
-                f"+ pmod(xxhash64(semente, n, 3), {(horas.maximo - horas.minimo) * 3600})) AS data_hora_venda",
+                f"{instante('data', horas, 'semente', 'n', 3)} AS data_hora_venda",
                 f"{antecedencia.minimo} + pmod(xxhash64(semente, n, 4), "
                 f"{antecedencia.maximo - antecedencia.minimo + 1}) AS _antecedencia",
                 f"{canal} AS canal",
                 f"1 + pmod(xxhash64(semente, n, 6), {p.poltronas}) AS poltrona",
                 f"{adiamento.minimo} + pmod(xxhash64(semente, n, 8), "
                 f"{adiamento.maximo - adiamento.minimo + 1}) AS _adiamento",
-                f"{u(9)} AS _u_momento",
+                f"{uniforme_do_lote(9)} AS _u_momento",
             )
             .withColumn("data_viagem", F.expr("date_add(data, cast(_antecedencia AS int))"))
             .withColumn("_destino", F.expr(destino))
             .join(clientes.select("id_cliente", "_indice_cliente"), "_indice_cliente")
-            .join(linhas_, "_indice_linha")
+            .join(linhas_numeradas, "_indice_linha")
             .withColumn("valor", F.expr(
                 f"CASE WHEN data >= DATE'{reajuste}' THEN tarifa_reajustada ELSE tarifa_base END"))
             .withColumn("_adiamento", F.col("_adiamento").cast("int"))

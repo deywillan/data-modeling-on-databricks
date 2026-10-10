@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from ..cdc import Mudancas
 from ..defeitos import Defeitos
+from ..expressoes import inteiro_e_fracao
 from ..mundo import linhas as linhas_na_escala
 from ..snapshot import datas_de_snapshot, entrega_snapshot, registrar_por_arquivo
 from .base import Contexto, Entrega
@@ -57,22 +58,7 @@ def por_dia(contexto: Contexto, volume: int) -> tuple[int, float]:
     linhas na escala 1."""
     datas = contexto.roteiro.datas
     dias = (contexto.roteiro.parametros.legados.snapshots.desde - datas.inicio).days
-    taxa = linhas_na_escala(volume, contexto.escala) / dias
-    return int(taxa), taxa - int(taxa)
+    return inteiro_e_fracao(linhas_na_escala(volume, contexto.escala) / dias)
 
 
-def sorteio(pesos: dict[str, float], u: str) -> str:
-    """Expressão SQL que escolhe um dos nomes de `pesos` pelo uniforme `u`."""
-    nomes, total, acumulado, casos = sorted(pesos), sum(pesos.values()), 0.0, []
-    for nome in nomes[:-1]:
-        acumulado += pesos[nome] / total
-        casos.append(f"WHEN {u} < {acumulado!r} THEN {_literal(nome)}")
-    ultimo = _literal(nomes[-1])
-    return f"CASE {' '.join(casos)} ELSE {ultimo} END" if casos else ultimo
-
-
-def _literal(texto: str) -> str:
-    return "'" + texto.replace("\\", "\\\\").replace("'", "\\'") + "'"
-
-
-__all__ = ["DEFEITO_DE_ARQUIVO", "entregar", "por_dia", "sorteio"]
+__all__ = ["DEFEITO_DE_ARQUIVO", "entregar", "por_dia"]

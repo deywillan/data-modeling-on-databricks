@@ -7,19 +7,14 @@ exatamente os mesmos bytes. Regras:
 - o que tem semântica de texto (JSON, datas, valores monetários) é formatado no Spark;
 - nada de Python UDF (falha via Databricks Connect serverless).
 
-Interface: `Arquivo`, `caminho_landing(...)` e os serializadores `json_linhas`, `csv` e
-`parquet`, que recebem um DataFrame e devolvem `bytes`, e `parquet_de_arrow` e
-`csv_de_arrow`, para uma `pyarrow.Table` já coletada.
+Interface: `Arquivo`, `caminho_landing(...)` e os serializadores `parquet_de_arrow` e
+`csv_de_arrow`, que recebem uma `pyarrow.Table` já coletada e ordenada e devolvem `bytes`. O
+JSON (CDC e APIs) é montado no Spark, com `to_json`, pelos motores que o entregam.
 """
 
 import io
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pyspark.sql import DataFrame
 
 
 @dataclass(frozen=True)
@@ -36,37 +31,6 @@ def caminho_landing(sistema: str, entidade: str, data_simulada: date, extensao: 
         f"{sistema}/{entidade}/{data_simulada.isoformat()}/"
         f"{entidade}_{data_simulada:%Y%m%d}_{sequencial:04d}.{extensao}"
     )
-
-
-def json_linhas(df: "DataFrame", ordem: Sequence[str]) -> bytes:
-    """JSON lines (uma linha por registro, UTF-8), serializado no Spark com `to_json`.
-
-    Colunas `struct`/`array` viram JSON aninhado.
-    """
-    from pyspark.sql import functions as F
-
-    linhas = (
-        df.select(*ordem, F.to_json(F.struct(*df.columns)).alias("_linha"))
-        .orderBy(*ordem)
-        .select("_linha")
-        .collect()
-    )
-    return "".join(f"{linha[0]}\n" for linha in linhas).encode("utf-8")
-
-
-def csv(df: "DataFrame", ordem: Sequence[str], separador: str = ",", encoding: str = "utf-8") -> bytes:
-    """CSV com cabeçalho. Formate números e datas no Spark antes (o pandas traz `Decimal`).
-
-    Com `encoding="latin-1"`, caracteres fora do latin1 fazem a serialização falhar.
-    """
-    tabela = df.orderBy(*ordem).toPandas()
-    texto = tabela.to_csv(sep=separador, index=False, lineterminator="\n")
-    return texto.encode(encoding, errors="strict")
-
-
-def parquet(df: "DataFrame", ordem: Sequence[str]) -> bytes:
-    """Parquet (snappy, sem metadados do pandas), com os tipos preservados via Arrow."""
-    return parquet_de_arrow(df.orderBy(*ordem).toArrow())
 
 
 def parquet_de_arrow(tabela) -> bytes:
