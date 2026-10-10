@@ -204,7 +204,7 @@ def test_reajuste_de_tarifas_do_roteiro_atualiza_todas_as_tarifas_em_12_01_2026(
 @pytest.mark.lento
 def test_gerar_sistema_ou_dia_isoladamente_produz_o_mesmo_conteudo(com_gabarito, principal_em_partes):
     _, carga, completo = com_gabarito
-    # Outra fatia (sem o Rastro), carga até 09/01/2026 e três avanços de 1 dia.
+    # Outra fatia (sem o Rastro), carga até 09/01/2026, um avanço de 1 dia e outro de 2.
     em_partes = _arquivos_embarque(principal_em_partes.final)
 
     assert em_partes == completo

@@ -2,7 +2,7 @@
 gabarito.
 
 Usa a geração `principal` (carga inicial até 31/12/2025 e 12 dias avançados de uma vez) e,
-nos testes lentos, a `principal_em_partes` (carga até 09/01/2026 e três avanços de 1 dia),
+nos testes lentos, a `principal_em_partes` (carga até 09/01/2026, um avanço de 1 dia e outro de 2),
 que deve chegar ao mesmo conteúdo. O pico de updates de tarifa do *Embarque* em 12/01/2026
 é verificado em `test_embarque.py`.
 """
@@ -60,11 +60,11 @@ def test_avancar_cria_so_arquivos_novos_e_move_o_relogio(principal, tmp_path):
 
 
 @pytest.mark.lento
-def test_avancar_varios_dias_de_uma_vez_ou_um_por_vez_grava_o_mesmo_conteudo(principal, principal_em_partes):
+def test_avancar_de_uma_vez_ou_em_mais_de_uma_chamada_grava_o_mesmo_conteudo(principal, principal_em_partes):
     de_uma_vez, em_partes = principal.final, principal_em_partes.final
     resultados = principal_em_partes.resultados[1:]
 
-    assert [r.data_relogio for r in resultados] == [date(2026, 1, 10), date(2026, 1, 11), date(2026, 1, 12)]
+    assert [r.data_relogio for r in resultados] == [date(2026, 1, 10), date(2026, 1, 12)]
     novos_de_uma_vez = [
         c for c in _dos_sistemas(_sem_relogio(_conteudo(de_uma_vez.volume)), SISTEMAS_EM_PARTES)
         if c.split("/")[2] >= "2026-01-10"

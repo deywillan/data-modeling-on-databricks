@@ -157,7 +157,8 @@ Os testes chamam a API pública com um destino em diretório local e inspecionam
 
 - os testes não geram dados por conta própria: pedem uma das gerações compartilhadas de `tests/geracoes.py` (fixtures de sessão em `tests/conftest.py`), e cada geração roda no máximo uma vez por execução do pytest;
 - o resultado de cada geração fica em `00-gerador/.cache-testes/` (fora do Git), sob o hash do código do gerador e do roteiro. Enquanto o código não muda, uma nova execução não abre sessão no workspace. `--sem-cache` gera tudo de novo;
-- a execução padrão deixa de fora os testes marcados como `lento` (gerações extras de determinismo e de geração em partes, fatias inteiras dos artigos e o Unity Catalog).
+- logo depois da coleta, as gerações que os testes escolhidos pedem rodam em paralelo (até três por vez, na mesma sessão), em vez de uma depois da outra;
+- a execução padrão deixa de fora os testes marcados como `lento` (gerações extras de determinismo e de geração em partes, fatias inteiras dos artigos e o Unity Catalog). Com o cache vazio, a execução padrão leva cerca de 9 minutos; com o cache cheio, menos de 30 segundos.
 
 ```bash
 cd 00-gerador

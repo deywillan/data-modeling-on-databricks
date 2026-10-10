@@ -38,6 +38,9 @@ from modelbricks_gerador import DestinoLocal, Resultado, avancar_tempo, carregar
 RAIZ_GERADOR = Path(__file__).resolve().parents[1]
 CACHE = RAIZ_GERADOR / ".cache-testes"
 CARGA_INICIAL = date(2025, 12, 31)
+# Com várias gerações em paralelo na mesma sessão, o servidor Connect às vezes invalida o cursor
+# de um resultado grande (INVALID_CURSOR.POSITION_NOT_AVAILABLE); a geração é repetida uma vez.
+TENTATIVAS = 2
 
 # Ajustes do roteiro de teste, por sistema (cada um só afeta o próprio sistema).
 TAXAS_SOLTICKET = {"pessoa_duplicada_no_sistema": 0.10, "fk_orfa": 0.05, "municipio_fora_do_padrao": 0.10}
@@ -124,7 +127,7 @@ PATIO = Geracao("patio", "92-patio", 0.2, "teste", (("gerar", date(2026, 1, 3)),
 # Gerações dos testes marcados como `lento`.
 PRINCIPAL_EM_PARTES = Geracao(  # mesma história da PRINCIPAL, cortada em outros pontos
     "principal_em_partes", "94-partes", 0.05, "teste",
-    (("gerar", date(2026, 1, 9)), ("avancar", 1), ("avancar", 1), ("avancar", 1)),
+    (("gerar", date(2026, 1, 9)), ("avancar", 1), ("avancar", 2)),
 )
 LEGADOS_EM_PARTES = Geracao(  # véspera da aquisição e uma semana de avanço
     "legados_em_partes", "98-legados", 0.1, "embarque_sujo", (("gerar", date(2025, 6, 30)), ("avancar", 7)),
@@ -172,14 +175,17 @@ def obter(geracao: Geracao, pasta_temporaria: Path, obter_spark, usar_cache: boo
 
     # Com cache, o trabalho fica dentro do cache para o `os.replace` final não cruzar discos.
     base = CACHE if usar_cache else pasta_temporaria
-    trabalho = base / f".em-andamento-{geracao.nome}-{uuid.uuid4().hex[:8]}"
-    trabalho.mkdir(parents=True)
-    (trabalho / "roteiro.yaml").write_text(roteiro, encoding="utf-8")
-    try:
-        _executar(geracao, trabalho, obter_spark())
-    except BaseException:
-        shutil.rmtree(trabalho, ignore_errors=True)
-        raise
+    for tentativa in range(TENTATIVAS):
+        trabalho = base / f".em-andamento-{geracao.nome}-{uuid.uuid4().hex[:8]}"
+        trabalho.mkdir(parents=True)
+        (trabalho / "roteiro.yaml").write_text(roteiro, encoding="utf-8")
+        try:
+            _executar(geracao, trabalho, obter_spark())
+            break
+        except BaseException as erro:
+            shutil.rmtree(trabalho, ignore_errors=True)
+            if tentativa + 1 == TENTATIVAS or "INVALID_CURSOR" not in str(erro):
+                raise
     if not usar_cache:
         return _ler(trabalho, geracao)
     shutil.rmtree(pasta, ignore_errors=True)

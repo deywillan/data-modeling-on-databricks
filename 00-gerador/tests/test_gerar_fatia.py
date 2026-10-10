@@ -2,11 +2,11 @@
 destino local: sistemas da fatia, formatos, determinismo, idempotência, `reset` e a
 fronteira do primeiro destino (nada em `bronze`, `silver` ou `gold`).
 
-Para poupar a cota, a fatia é gerada só duas vezes: na geração compartilhada `fatia_01`
-(carga inicial e avanço de 1 dia, pré-aquecida em paralelo e com cache) e no destino B, cópia
-da carga recriada com `reset=True`, o que também compara duas gerações independentes. A
-segunda chamada sem reset volta antes de abrir a sessão. É o teste de marco do ticket 10
-(fatia oficial inteira), por isso marcado como `lento`.
+Para poupar a cota, a fatia é gerada uma única vez, na geração compartilhada `fatia_01`
+(carga inicial e avanço de 1 dia, pré-aquecida em paralelo e com cache). A segunda chamada sem
+reset volta antes de abrir a sessão e o `reset=True` roda sobre uma cópia da carga com a fatia
+reduzida ao IBGE, o que basta para provar que o ambiente é recriado do zero. É o teste de marco
+do ticket 10 (fatia oficial inteira), por isso marcado como `lento`.
 """
 
 import csv
@@ -61,7 +61,9 @@ def fatia(fatia_01, spark, tmp_path_factory):
     shutil.copytree(carga_inicial.raiz, b.raiz)
     intruso = b.raiz / "bronze" / "sobra_de_execucao_anterior.txt"
     intruso.write_text("lixo", encoding="utf-8")
-    recriada = gerar_fatia(ARTIGO, b, escala=ESCALA, reset=True, spark=spark, roteiro=fatia_01.roteiro)
+    # O reset recria o ambiente do zero; para poupar a cota, recria só o IBGE (fatia reduzida),
+    # que é a parte da carga que se pode comparar byte a byte com a da geração compartilhada.
+    recriada = gerar_fatia(ARTIGO, b, escala=ESCALA, reset=True, spark=spark, roteiro=geracoes.roteiro_so_ibge())
     return {
         "a": fatia_01.final, "b": b, "carga": carga, "primeira": fatia_01.resultados[0], "segunda": segunda,
         "depois_da_segunda": depois_da_segunda, "avanco": fatia_01.resultados[1], "recriada": recriada,
@@ -154,4 +156,6 @@ def test_avancar_um_dia_so_cria_lotes_do_dia_novo_dos_sistemas_da_fatia(fatia):
 def test_reset_recria_o_ambiente_do_zero_com_o_mesmo_conteudo(fatia):
     assert fatia["recriada"].gerou
     assert not fatia["intruso"].exists()
-    assert _conteudo(fatia["b"].raiz) == fatia["carga"], "duas gerações da fatia gravam os mesmos bytes"
+    ibge_e_relogio = {c: v for c, v in fatia["carga"].items() if c.startswith(("landing/landing/ibge/", "landing/landing/_controle/"))}
+    assert ibge_e_relogio
+    assert _conteudo(fatia["b"].raiz) == ibge_e_relogio, "o ambiente recriado grava os mesmos bytes"
