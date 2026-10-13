@@ -32,7 +32,7 @@ O mundo verdadeiro é sempre gerado inteiro, em qualquer artigo. Por isso, o mes
 | *SolTicket*, *SolFin* | sistemas legados do Expresso Vale do Sol, empresa adquirida pelo grupo | carga histórica única na data da aquisição e, depois, snapshots periódicos | CSV com `;` em `latin1` | `solticket/`, `solfin/` |
 | IBGE | dado público de referência | arquivo único na carga inicial | CSV | `ibge/municipios` |
 
-A docstring de cada módulo em [`src/modelbricks_gerador/sistemas/`](src/modelbricks_gerador/sistemas/) descreve as entidades, as colunas e as regras de cada sistema.
+A pasta [`docs/`](docs/README.md) documenta cada base: diagrama ER em Mermaid, dicionário de dados, ciclo de vida dos registros e defeitos. O `gabarito` também está lá. A docstring de cada módulo em [`src/modelbricks_gerador/sistemas/`](src/modelbricks_gerador/sistemas/) traz as regras de geração.
 
 ### Organização dos catálogos
 
