@@ -187,7 +187,7 @@ Uma linha por defeito entregue na landing, para conferir se a Silver encontrou e
 | `valor_sujo` | string | Valor como chegou na landing. |
 | `data_entrega` | date | Dia do lote em que o defeito chegou. |
 | `seq` | bigint | `seq` da operação, nos sistemas com CDC. |
-| `arquivo` | string | Caminho do arquivo, nos sistemas sem CDC. |
+| `arquivo` | string | Caminho do arquivo em que o defeito chegou: nos defeitos de arquivo e de coluna, e nos de linha do *Núcleo*, do *Apólice+* e do *PassagemHub*. Nulo nos defeitos de linha do *Pátio*, do *SolTicket* e do *Rastro*, que se localizam por `data_entrega` e `chave_sistema`. |
 
 ```mermaid
 erDiagram

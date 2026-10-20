@@ -144,7 +144,8 @@ Os eventos são imutáveis. Uma mudança no pedido chega como um evento novo, co
 | `cancelamento` | Entre a compra e a 0h do dia da viagem. | 6% dos pedidos. |
 | `remarcacao` | Idem, com `viagem.data` adiada de 1 a 15 dias. | 3% dos pedidos. |
 
-O marketplace não informa a utilização da passagem nem estornos.
+- Pedido com viagem para o mesmo dia da compra nunca é cancelado nem remarcado.
+- O marketplace não informa a utilização da passagem nem estornos.
 
 ### Evolução do schema
 
