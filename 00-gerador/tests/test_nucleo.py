@@ -13,7 +13,7 @@ import io
 import math
 import re
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import geracoes
 import pyarrow.parquet as pq
@@ -200,6 +200,22 @@ def test_colaboradores_trazem_o_cargo_e_as_mudancas_de_cargo(gerado):
     anos = ((ULTIMO_DIA - roteiro.datas.inicio).days + 1) / 365
     esperado = len(versoes) * roteiro.parametros.nucleo.mudanca_cargo_ao_ano * anos
     assert esperado / 3 <= mudancas <= esperado * 3, f"{mudancas} mudanças de cargo (esperado ~{esperado:.0f})"
+
+
+def test_ativos_depreciam_no_fim_de_cada_mes_seguinte_a_aquisicao(gerado):
+    _, _, _, linhas, _ = gerado
+    versoes = _versoes(linhas["ativos"], "id_ativo")
+
+    assert versoes
+    for id_ativo, historico in versoes.items():
+        aquisicao = historico[0]
+        assert aquisicao["valor_contabil"] == aquisicao["valor_aquisicao"]
+        mes_aquisicao = (aquisicao["data_aquisicao"].year, aquisicao["data_aquisicao"].month)
+        for anterior, atual in zip(historico, historico[1:]):
+            dia = atual["updated_at"].date()
+            assert (dia.year, dia.month) > mes_aquisicao, f"{id_ativo}: o mês da aquisição não deprecia"
+            assert (dia + timedelta(days=1)).day == 1, f"{id_ativo}: depreciação no último dia do mês"
+            assert atual["valor_contabil"] < anterior["valor_contabil"], f"{id_ativo}: toda versão nova deprecia"
 
 
 def test_mapa_chave_verdadeira_para_chave_do_nucleo_no_gabarito(gerado):

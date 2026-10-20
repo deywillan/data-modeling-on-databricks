@@ -378,7 +378,7 @@ class _Projecao:
         taxa_mes = self.p.depreciacao_ao_ano / 12
         depreciacao = (
             self.calendario().where("data = last_day(data)").crossJoin(frota)
-            .where("data > data_aquisicao")
+            .where("data > last_day(data_aquisicao)")  # o mês da aquisição ainda não deprecia
             .selectExpr(
                 *imagem,
                 f"cast(greatest(round(valor_aquisicao * (1 - {taxa_mes!r} * "

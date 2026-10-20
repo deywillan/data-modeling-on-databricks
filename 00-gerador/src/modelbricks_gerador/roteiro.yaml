@@ -4,7 +4,7 @@
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 13
+versao: 14
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
