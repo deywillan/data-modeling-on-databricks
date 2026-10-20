@@ -181,7 +181,8 @@ def test_compradores_sao_clientes_da_viacao_com_chave_e_grafia_do_sistema(gerado
     for e in _eventos(arquivos):
         comprador, viagem, pedido = e["comprador"], e["viagem"], e["pedido"]["codigo"]
         pessoa = pessoas[clientes[comprador["id_cliente"]]]
-        assert comprador["cpf"] == _cpf_com_mascara(pessoa["cpf"])
+        if (pedido, "cpf") not in sujos:
+            assert comprador["cpf"] == _cpf_com_mascara(pessoa["cpf"])
         if (pedido, "nome") not in sujos:
             assert comprador["nome"] == pessoa["nome"].upper()
         for campo in ("email", "telefone"):
@@ -209,6 +210,8 @@ def test_defeitos_do_roteiro_aplicados_por_pedido_e_registrados_no_gabarito(gera
         pedido, comprador = e["pedido"]["codigo"], e["comprador"]
         pessoa = pessoas[clientes[comprador["id_cliente"]]]
         pedidos.add(pedido)
+        if comprador["cpf"] != _cpf_com_mascara(pessoa["cpf"]):
+            observados["cpf_fora_do_padrao"].add((pedido, "cpf", e["_lote"], e["_arquivo"]))
         if comprador["nome"] != pessoa["nome"].upper():
             observados["nome_abreviado_ou_com_erro"].add((pedido, "nome", e["_lote"], e["_arquivo"]))
         for campo in ("email", "telefone"):
@@ -221,10 +224,13 @@ def test_defeitos_do_roteiro_aplicados_por_pedido_e_registrados_no_gabarito(gera
         assert r["tabela_verdadeira"] == "pessoas" and r["entidade"] == "eventos_venda"
         if r["tipo"] == "nome_abreviado_ou_com_erro":
             assert r["valor_original"] == pessoas[r["id_verdadeiro"]]["nome"].upper() != r["valor_sujo"]
+        if r["tipo"] == "cpf_fora_do_padrao":
+            assert r["valor_original"] == _cpf_com_mascara(pessoas[r["id_verdadeiro"]]["cpf"]) != r["valor_sujo"]
+            assert r["valor_sujo"] in (pessoas[r["id_verdadeiro"]]["cpf"], pessoas[r["id_verdadeiro"]]["cpf"].lstrip("0"))
         registrados[r["tipo"]].add((r["chave_sistema"], r["coluna"], r["data_entrega"], r["arquivo"]))
 
     taxas = {t: d.taxas["passagemhub"] for t, d in roteiro.defeitos.items() if "passagemhub" in d.taxas}
-    assert set(registrados) == set(taxas) == {"nome_abreviado_ou_com_erro", "contato_nulo"}
+    assert set(registrados) == set(taxas) == {"cpf_fora_do_padrao", "nome_abreviado_ou_com_erro", "contato_nulo"}
     for tipo, taxa in taxas.items():
         assert observados[tipo] == registrados[tipo], f"{tipo}: landing e gabarito divergem"
         sujos = {o[0] for o in observados[tipo]}

@@ -284,7 +284,7 @@ eventos:
 defeitos:
   cpf_fora_do_padrao:
     descricao: CPF sem máscara, com máscara ou com zeros à esquerda perdidos.
-    taxas: {solticket: 0.30, apolice: 0.05}
+    taxas: {solticket: 0.30, apolice: 0.05, passagemhub: 0.05}
   nome_abreviado_ou_com_erro:
     descricao: Nome abreviado ou com erro de digitação ("Mª", "Jose" vs. "José").
     taxas: {passagemhub: 0.10, solticket: 0.10}

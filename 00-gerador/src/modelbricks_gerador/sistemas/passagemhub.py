@@ -27,9 +27,9 @@ colunas planas, sem UDF. Números no `roteiro.yaml`; o preço segue o reajuste d
 Viação (`reajuste_tarifas_embarque`), porque o marketplace vende a mesma tarifa.
 
 Defeitos (`defeitos.py`), sorteados por pedido (todos os eventos do pedido saem iguais),
-aplicados na grafia do sistema e registrados com o arquivo da página: nome abreviado ou
-com erro e contato nulo, como no Estudo de Caso; o CPF fora do padrão também é chamado e
-só age se o roteiro der taxa ao *PassagemHub*.
+aplicados na grafia do sistema e registrados com o arquivo da página: CPF fora do padrão
+(sem a máscara do sistema ou sem os zeros à esquerda), nome abreviado ou com erro e contato
+nulo, como no Estudo de Caso.
 """
 
 from datetime import date, timedelta

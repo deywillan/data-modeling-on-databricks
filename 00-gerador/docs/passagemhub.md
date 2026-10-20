@@ -166,5 +166,6 @@ Os defeitos são sorteados **por pedido**: todos os eventos de um pedido sujo sa
 
 | Defeito | Taxa | Como aparece |
 |---|---|---|
+| CPF fora do padrão | 5% dos pedidos | `comprador.cpf` sem a máscara (11 dígitos) ou sem os zeros à esquerda. |
 | Nome abreviado ou com erro | 10% dos pedidos | `comprador.nome` sem acentos, com o nome do meio abreviado ou com uma letra omitida. |
 | Contato nulo | 15% dos pedidos | `comprador.contato.email` ou `telefone` nulo. |
