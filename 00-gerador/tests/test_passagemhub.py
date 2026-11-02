@@ -1,7 +1,7 @@
 """*PassagemHub* (marketplace parceiro da ModelBricks Viação): API paginada em JSON aninhado.
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: as páginas na landing e, nas
-fatias com gabarito, as tabelas do schema `gabarito`.
+Observado só pelo que `gerar_carga_inicial`/`avancar_tempo` gravam: as páginas na landing e as
+tabelas do schema `gabarito`.
 
 Para poupar a cota, o módulo usa a geração `principal` (ver `geracoes.py`), compartilhada
 com os outros sistemas, cujo roteiro de teste tem a página pequena, para que cada dia tenha
@@ -46,7 +46,7 @@ def _eventos(arquivos: dict[str, bytes]) -> list[dict]:
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
     """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do PassagemHub (a
-    fatia tem outros sistemas)."""
+    carga tem outros sistemas)."""
     return geracoes.gabarito(destino, "passagemhub")
 
 

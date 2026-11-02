@@ -9,7 +9,7 @@ ERP do Grupo ModelBricks: financeiro, faturamento, fornecedores, colaboradores e
 | Arquivos | um por entidade e dia com mudanças: `nucleo/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.parquet` |
 | Entidades | `colaboradores`, `fornecedores`, `titulos_pagar`, `notas_fiscais`, `ativos` |
 | Volume (escala 1) | 1.500 colaboradores, cerca de 300 fornecedores, 24 mil títulos a pagar e 3 mil notas fiscais em 2024 e 2025 |
-| Fatias | 02, 03 e 10 |
+| Artigos | 01, 02, 03 e 10 |
 
 ## Diagrama ER
 
@@ -174,7 +174,7 @@ Veículos da frota própria, registrados como ativo imobilizado da empresa que o
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|
@@ -185,4 +185,4 @@ Em `gabarito.mapa_chaves` (fatias com gabarito):
 
 ## Defeitos
 
-O roteiro não aplica defeitos ao *Núcleo*: os arquivos chegam limpos em todas as fatias. O código do gerador sabe aplicar CPF fora do padrão e nome abreviado aos colaboradores, contato nulo aos fornecedores e evento atrasado a todas as entidades, caso o roteiro passe a dar taxa a eles.
+O roteiro não aplica defeitos ao *Núcleo*: os arquivos chegam limpos. O código do gerador sabe aplicar CPF fora do padrão e nome abreviado aos colaboradores, contato nulo aos fornecedores e evento atrasado a todas as entidades, caso o roteiro passe a dar taxa a eles.

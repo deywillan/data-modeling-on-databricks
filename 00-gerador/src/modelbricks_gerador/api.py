@@ -1,7 +1,7 @@
 """API pública do gerador: o único seam que jobs e testes usam.
 
-- `gerar_fatia(artigo, destino, ...)`: carga inicial da fatia do artigo.
-- `avancar_tempo(artigo, destino, dias, ...)`: lotes dos dias seguintes ao relógio.
+- `gerar_carga_inicial(destino, ...)`: carga inicial de todos os sistemas na Bronze da série.
+- `avancar_tempo(destino, dias, ...)`: lotes dos dias seguintes ao relógio.
 
 As duas devolvem um `Resultado` e imprimem uma mensagem curta em português.
 """
@@ -32,15 +32,13 @@ TABELA_DEFEITOS = "defeitos"  # gabarito: cada defeito injetado nos dados da lan
 class Resultado:
     """Resumo de uma chamada da API."""
 
-    artigo: str
     data_relogio: date  # data simulada do relógio ao final da chamada
     gerou: bool  # False quando nada foi gravado (ex.: carga inicial já feita)
     arquivos: int  # arquivos novos gravados na landing (sem contar o relógio)
     mensagem: str
 
 
-def gerar_fatia(
-    artigo: str,
+def gerar_carga_inicial(
     destino: Destino,
     escala: float = 1,
     ate: date | None = None,
@@ -49,107 +47,98 @@ def gerar_fatia(
     spark: "SparkSession | None" = None,
     roteiro: Roteiro | str | Path | None = None,
 ) -> Resultado:
-    """Prepara o ambiente do artigo e grava a carga inicial da fatia até `ate`.
+    """Prepara o lakehouse da série e grava a carga inicial de todos os sistemas até `ate`.
 
-    Cria os três catálogos do artigo (`aNN_bronze_<amb>`, `aNN_silver_<amb>`, `aNN_gold_<amb>`),
-    no Bronze um schema por sistema da fatia com o Volume `landing` e o schema `_controle`
-    (relógio) e, se a fatia pedir, o schema `gabarito` no Silver; só as landings, o relógio e o
-    gabarito recebem dados. O `destino` já sabe o artigo e o ambiente. Se o relógio já existir, não
-    altera nada e informa a data atual (mas levanta `RelogioIncompativel` se ele foi gravado com
-    outra versão do roteiro ou outra escala); com `reset=True`, recria o ambiente do zero.
+    Cria os três catálogos da série (`bronze_<amb>`, `silver_<amb>`, `gold_<amb>`), no Bronze
+    um schema por sistema da carga com o Volume `landing` e o schema `_controle` (relógio), e o
+    schema `gabarito` no Silver; só as landings, o relógio e o gabarito recebem dados. O
+    `destino` já sabe o ambiente. Se o relógio já existir, não altera nada e informa a data
+    atual (mas levanta `RelogioIncompativel` se ele foi gravado com outra versão do roteiro ou
+    outra escala); com `reset=True`, apaga os três catálogos e recomeça do zero.
     `ate` padrão: `datas.carga_inicial` do roteiro. `roteiro` aceita um caminho alternativo.
 
     Se a chamada cair no meio, basta repeti-la: arquivo já gravado com os mesmos bytes conta
     como entregue (bytes diferentes continuam sendo erro) e o relógio só é gravado no fim.
     """
     roteiro = _roteiro(roteiro)
-    fatia = roteiro.fatia(artigo)
-    _conferir_destino(destino, artigo)
     if escala <= 0:
         raise ValueError(f"escala deve ser positiva (recebido {escala}).")
     ate = ate or roteiro.datas.carga_inicial
     if ate < roteiro.datas.inicio:
         raise ValueError(f"ate ({ate}) é anterior ao início da história ({roteiro.datas.inicio}).")
 
-    destino.preparar(fatia.sistemas, gabarito=fatia.gabarito, reset=reset)
+    destino.preparar(roteiro.carga.sistemas, reset=reset)
 
     relogio = ler_relogio(destino)
     if relogio is not None:
         conferir_relogio(relogio, roteiro.versao, float(escala))
         return _concluir(
             Resultado(
-                artigo, relogio.data_simulada, False, 0,
-                f"{artigo}: carga inicial já feita; relógio em {relogio.data_simulada:%d/%m/%Y}. "
+                relogio.data_simulada, False, 0,
+                f"Carga inicial já feita; relógio em {relogio.data_simulada:%d/%m/%Y}. "
                 "Nada foi alterado (use reset=True para recomeçar do zero).",
             )
         )
 
-    contexto = Contexto(_sessao(spark, roteiro), roteiro, fatia, float(escala), carga_inicial=True)
+    contexto = Contexto(_sessao(spark, roteiro), roteiro, roteiro.carga, float(escala), carga_inicial=True)
     entregas, arquivos = _projetar(contexto, roteiro.datas.inicio, ate, destino)
-    if fatia.gabarito:
-        t0 = time.monotonic()
-        for tabela in contexto.mundo:
-            destino.gravar_gabarito(tabela, contexto.mundo.ordenado(tabela))
-        _gravar_mapa_chaves(entregas, destino)
-        _gravar_defeitos(contexto, entregas, destino, acrescentar=False)
-        print(f"  gabarito: {time.monotonic() - t0:.0f} s")
-    gravar_relogio(destino, Relogio(ate, artigo, float(escala), roteiro.versao))
+    t0 = time.monotonic()
+    for tabela in contexto.mundo:
+        destino.gravar_gabarito(tabela, contexto.mundo.ordenado(tabela))
+    _gravar_mapa_chaves(entregas, destino)
+    _gravar_defeitos(contexto, entregas, destino, acrescentar=False)
+    print(f"  gabarito: {time.monotonic() - t0:.0f} s")
+    gravar_relogio(destino, Relogio(ate, float(escala), roteiro.versao))
     return _concluir(
         Resultado(
-            artigo, ate, True, arquivos,
-            f"{artigo}: carga inicial gravada ({arquivos} arquivos na landing); relógio em {ate:%d/%m/%Y}.",
+            ate, True, arquivos,
+            f"Carga inicial gravada ({arquivos} arquivos na landing); relógio em {ate:%d/%m/%Y}.",
         )
     )
 
 
 def avancar_tempo(
-    artigo: str,
     destino: Destino,
     dias: int,
     *,
     spark: "SparkSession | None" = None,
     roteiro: Roteiro | str | Path | None = None,
 ) -> Resultado:
-    """Gera os lotes de `relógio+1` até `relógio+dias` da fatia, grava só arquivos novos e
-    avança o relógio. Exige a carga inicial (`gerar_fatia`) feita no mesmo destino, com a mesma
-    versão do roteiro (senão levanta `RelogioIncompativel`).
+    """Gera os lotes de `relógio+1` até `relógio+dias` de todos os sistemas da carga, grava só
+    arquivos novos e avança o relógio. Exige a carga inicial (`gerar_carga_inicial`) feita no
+    mesmo destino, com a mesma versão do roteiro (senão levanta `RelogioIncompativel`).
 
     Se a chamada cair no meio, basta repeti-la: o relógio só avança no fim, os arquivos já
     gravados com os mesmos bytes contam como entregues e o gabarito do intervalo é regravado
     sem duplicar."""
     roteiro = _roteiro(roteiro)
-    fatia = roteiro.fatia(artigo)
-    _conferir_destino(destino, artigo)
     if dias < 1:
         raise ValueError(f"dias deve ser pelo menos 1 (recebido {dias}).")
     relogio = ler_relogio(destino)
     if relogio is None:
-        raise RuntimeError(f"{artigo}: o destino não tem relógio. Rode gerar_fatia antes de avancar_tempo.")
-    if relogio.artigo != artigo:
-        raise RuntimeError(f"O destino pertence ao artigo {relogio.artigo}, não a {artigo}.")
+        raise RuntimeError("O destino não tem relógio. Rode gerar_carga_inicial antes de avancar_tempo.")
     conferir_relogio(relogio, roteiro.versao)
 
     inicio = relogio.data_simulada + timedelta(days=1)
     fim = relogio.data_simulada + timedelta(days=dias)
-    contexto = Contexto(_sessao(spark, roteiro), roteiro, fatia, relogio.escala, carga_inicial=False)
+    contexto = Contexto(_sessao(spark, roteiro), roteiro, roteiro.carga, relogio.escala, carga_inicial=False)
     entregas, arquivos = _projetar(contexto, inicio, fim, destino)
-    if fatia.gabarito:
-        _gravar_mapa_chaves(entregas, destino)
-        # Uma tentativa anterior pode ter acrescentado os defeitos deste intervalo e caído antes do
-        # relógio: apaga as linhas do intervalo para a nova tentativa não duplicá-las.
-        destino.apagar_do_gabarito(TABELA_DEFEITOS, "data_entrega", inicio)
-        _gravar_defeitos(contexto, entregas, destino, acrescentar=True)
-    gravar_relogio(destino, Relogio(fim, artigo, relogio.escala, roteiro.versao))
+    _gravar_mapa_chaves(entregas, destino)
+    # Uma tentativa anterior pode ter acrescentado os defeitos deste intervalo e caído antes do
+    # relógio: apaga as linhas do intervalo para a nova tentativa não duplicá-las.
+    destino.apagar_do_gabarito(TABELA_DEFEITOS, "data_entrega", inicio)
+    _gravar_defeitos(contexto, entregas, destino, acrescentar=True)
+    gravar_relogio(destino, Relogio(fim, relogio.escala, roteiro.versao))
     return _concluir(
         Resultado(
-            artigo, fim, True, arquivos,
-            f"{artigo}: {dias} dia(s) gerado(s) ({arquivos} arquivos novos); relógio em {fim:%d/%m/%Y}.",
+            fim, True, arquivos,
+            f"{dias} dia(s) gerado(s) ({arquivos} arquivos novos); relógio em {fim:%d/%m/%Y}.",
         )
     )
 
 
 def _projetar(contexto: Contexto, inicio: date, fim: date, destino: Destino) -> tuple[list[Entrega], int]:
-    """Projeta cada sistema da fatia no intervalo e grava os lotes na landing.
+    """Projeta cada sistema da carga no intervalo e grava os lotes na landing.
 
     A gravação de um sistema roda numa thread enquanto o Spark gera o seguinte (a geração e o
     upload levam, cada um, metade do tempo do setup). No máximo uma gravação fica pendente,
@@ -159,7 +148,7 @@ def _projetar(contexto: Contexto, inicio: date, fim: date, destino: Destino) -> 
     entregas, arquivos = [], 0
     with ThreadPoolExecutor(max_workers=1) as gravador:
         pendente = None
-        for sistema in contexto.fatia.sistemas:
+        for sistema in contexto.carga.sistemas:
             projetar = PROJECOES.get(sistema)
             if projetar is None:
                 print(f"Aviso: o sistema '{sistema}' ainda não tem projeção no gerador; ignorado.")
@@ -210,12 +199,6 @@ def _gravar_defeitos(contexto: Contexto, entregas: list[Entrega], destino: Desti
     destino.gravar_gabarito(TABELA_DEFEITOS, defeitos.orderBy(*ordem), acrescentar=acrescentar)
 
 
-def _conferir_destino(destino: Destino, artigo: str) -> None:
-    """O destino aponta para os catálogos de um artigo; gravar neles dados de outro misturaria as fatias."""
-    if destino.artigo != artigo:
-        raise ValueError(f"O destino pertence ao artigo {destino.artigo}, não a {artigo}.")
-
-
 def _roteiro(roteiro: Roteiro | str | Path | None) -> Roteiro:
     return roteiro if isinstance(roteiro, Roteiro) else carregar_roteiro(roteiro)
 
@@ -235,4 +218,4 @@ def _concluir(resultado: Resultado) -> Resultado:
     return resultado
 
 
-__all__ = ["Resultado", "avancar_tempo", "gerar_fatia"]
+__all__ = ["Resultado", "avancar_tempo", "gerar_carga_inicial"]

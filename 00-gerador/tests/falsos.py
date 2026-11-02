@@ -2,7 +2,8 @@
 
 Os sistemas falsos (`falso_a` e `falso_b`) entregam um arquivo por dia, com bytes que dependem
 só do sistema e do dia, e, se pedido, um defeito nos dias de número ímpar. São registrados em
-`PROJECOES` só durante o teste (fixture `sistemas_falsos`, em `conftest.py`).
+`PROJECOES` só durante o teste (fixture `sistemas_falsos`, em `conftest.py`), que também troca
+o mundo verdadeiro por um vazio: a carga inicial grava o gabarito, e o mundo precisaria de Spark.
 """
 
 from datetime import date, timedelta
@@ -12,13 +13,17 @@ import pyarrow as pa
 
 from modelbricks_gerador import carregar_roteiro
 from modelbricks_gerador.escritor import Arquivo, caminho_landing
+from modelbricks_gerador.roteiro import Carga
 from modelbricks_gerador.sistemas.base import Entrega, Lote
 
-ARTIGO = "01-bronze"
 INICIO = date(2024, 1, 1)
 CARGA = date(2024, 1, 3)
 SISTEMAS_FALSOS = ("falso_a", "falso_b")
-SPARK_FALSO = SimpleNamespace(conf=SimpleNamespace(set=lambda *_: None))
+# A sessão falsa só fixa o fuso e cria a tabela vazia de defeitos da carga inicial.
+SPARK_FALSO = SimpleNamespace(
+    conf=SimpleNamespace(set=lambda *_: None),
+    createDataFrame=lambda linhas, _esquema: FalsoDataFrame(list(linhas)),
+)
 
 
 def projecao_falsa(sistema: str, defeitos: bool = False):
@@ -66,14 +71,12 @@ class FalsoDataFrame:
         return self
 
     def toArrow(self) -> pa.Table:
-        colunas = {nome: [linha[nome] for linha in self.linhas] for nome in self.linhas[0]}
-        tipos = {"data_entrega": pa.date32(), "tabela_verdadeira": pa.string(), "id_verdadeiro": pa.int64(),
-                 "seq": pa.int64(), "arquivo": pa.string()}
-        return pa.table({n: pa.array(v, tipos.get(n)) for n, v in colunas.items()})
+        nomes = self.linhas[0] if self.linhas else _defeito("", INICIO)
+        colunas = {nome: [linha[nome] for linha in self.linhas] for nome in nomes}
+        tipos = {"data_entrega": pa.date32(), "id_verdadeiro": pa.int64(), "seq": pa.int64()}
+        return pa.table({n: pa.array(v, tipos.get(n, pa.string())) for n, v in colunas.items()})
 
 
-def roteiro_falso(gabarito: bool = False):
-    """O roteiro oficial com a fatia 01-bronze trocada pelos sistemas falsos."""
-    roteiro = carregar_roteiro()
-    fatia = roteiro.fatia(ARTIGO).model_copy(update={"sistemas": list(SISTEMAS_FALSOS), "gabarito": gabarito})
-    return roteiro.model_copy(update={"fatias": {**roteiro.fatias, ARTIGO: fatia}})
+def roteiro_falso():
+    """O roteiro oficial com a carga trocada pelos sistemas falsos."""
+    return carregar_roteiro().model_copy(update={"carga": Carga(sistemas=list(SISTEMAS_FALSOS))})

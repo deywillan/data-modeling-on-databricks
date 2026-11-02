@@ -1,19 +1,20 @@
-"""Gerações compartilhadas dos testes: o roteiro de teste único, as fatias de teste e um
-executor com cache local.
+"""Gerações compartilhadas dos testes: o roteiro de teste único, os sistemas de cada geração e
+um executor com cache local.
 
-Cada chamada de `gerar_fatia`/`avancar_tempo` recalcula o mundo verdadeiro e os sistemas da
-fatia no Spark remoto e consome a cota diária do workspace. Por isso os testes não geram
+Cada chamada de `gerar_carga_inicial`/`avancar_tempo` recalcula o mundo verdadeiro e os sistemas
+da carga no Spark remoto e consome a cota diária do workspace. Por isso os testes não geram
 nada por conta própria: pedem uma das gerações declaradas aqui, por fixture de sessão
 (`conftest.py`), e cada geração roda no máximo uma vez por sessão de testes.
 
 - **Roteiro de teste único.** Uma cópia do roteiro oficial com os ajustes que os testes de
   cada sistema precisam (taxas de defeito mais altas para medir com folga, página pequena no
   *PassagemHub* etc.). Cada ajuste só mexe no próprio sistema, então os sistemas podem ser
-  gerados juntos na mesma fatia. A variante `embarque_sujo` também dá ao *Embarque* taxas de
+  gerados juntos na mesma carga. A variante `embarque_sujo` também dá ao *Embarque* taxas de
   todos os defeitos de linha (`test_defeitos.py`); os testes do *Embarque* (`test_embarque.py`)
   precisam do *Embarque* com as taxas oficiais, por isso são duas variantes.
-- **Fatias de teste.** Declaradas no roteiro de teste com números 90 a 98 (fora das fatias
-  dos artigos).
+- **Sistemas de cada geração.** O `00_setup` grava todos os sistemas; para gastar menos cota,
+  cada geração troca a `carga` do roteiro de teste só pelos sistemas que os seus testes medem
+  (`Geracao.sistemas`). As gerações `CARGA_COMPLETA` e `CARGA_MINIMA` usam a carga oficial.
 - **Cache local.** O resultado de cada geração (uma cópia do destino depois de cada passo e
   os `Resultado`s) fica em `00-gerador/.cache-testes/`, sob uma chave que é o hash do código
   do gerador, do roteiro usado e da própria geração. Mudou o código ou o roteiro, a chave
@@ -33,7 +34,8 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import yaml
 
-from modelbricks_gerador import DestinoLocal, Resultado, avancar_tempo, carregar_roteiro, gerar_fatia
+from modelbricks_gerador import DestinoLocal, Resultado, avancar_tempo, carregar_roteiro, gerar_carga_inicial
+from modelbricks_gerador.roteiro import Carga
 
 RAIZ_GERADOR = Path(__file__).resolve().parents[1]
 CACHE = RAIZ_GERADOR / ".cache-testes"
@@ -60,23 +62,12 @@ TAXAS_EMBARQUE = {
 }
 
 # Sistemas gerados juntos na geração principal (as projeções são independentes entre si).
-SISTEMAS = ["embarque", "nucleo", "rotacerta", "apolice", "passagemhub", "rastro"]
-FATIAS_DE_TESTE = {
-    "90-sistemas": {"sistemas": SISTEMAS, "janela_telemetria_dias": 90},
-    "91-legados": {"sistemas": ["embarque", "solticket", "solfin"]},
-    "92-patio": {"sistemas": ["patio"]},
-    "93-mundo": {"sistemas": ["ibge"]},
-    # O Rastro e o IBGE dependem da data da carga inicial (janela de telemetria e data do
-    # arquivo de municípios), então não entram na comparação da geração em partes.
-    "94-partes": {"sistemas": ["embarque", "nucleo", "rotacerta", "apolice", "passagemhub"]},
-    "98-legados": {"sistemas": ["solticket", "solfin"]},
-    # Mesmos sistemas da 90 (mais o Pátio), mas sem gabarito: nenhum defeito é injetado.
-    "95-limpa": {"sistemas": [*SISTEMAS, "patio"], "janela_telemetria_dias": 90, "gabarito": False},
-}
+SISTEMAS = ("embarque", "nucleo", "rotacerta", "apolice", "passagemhub", "rastro")
 
 
-def dados_do_roteiro(variante: str) -> dict:
-    """Roteiro de teste como dicionário: `teste` ou `embarque_sujo`."""
+def dados_do_roteiro(variante: str, sistemas: tuple[str, ...] | None = None) -> dict:
+    """Roteiro de teste como dicionário: `teste` ou `embarque_sujo`, com a carga trocada por
+    `sistemas` (sem eles, fica a carga oficial)."""
     texto = resources.files("modelbricks_gerador").joinpath("roteiro.yaml").read_text(encoding="utf-8")
     dados = yaml.safe_load(texto)
     defeitos, parametros = dados["defeitos"], dados["parametros"]
@@ -91,13 +82,13 @@ def dados_do_roteiro(variante: str) -> dict:
             defeitos[tipo]["taxas"]["embarque"] = taxa
     elif variante != "teste":
         raise ValueError(f"variante de roteiro desconhecida: {variante}")
-    for artigo, fatia in FATIAS_DE_TESTE.items():
-        dados["fatias"][artigo] = {"gabarito": True, **fatia}
+    if sistemas is not None:
+        dados["carga"]["sistemas"] = list(sistemas)
     return dados
 
 
-def texto_do_roteiro(variante: str) -> str:
-    return yaml.safe_dump(dados_do_roteiro(variante), allow_unicode=True, sort_keys=True)
+def texto_do_roteiro(variante: str, sistemas: tuple[str, ...] | None = None) -> str:
+    return yaml.safe_dump(dados_do_roteiro(variante, sistemas), allow_unicode=True, sort_keys=True)
 
 
 @dataclass(frozen=True)
@@ -109,7 +100,7 @@ class Geracao:
     """
 
     nome: str
-    artigo: str
+    sistemas: tuple[str, ...] | None  # a carga da geração; `None` é a carga oficial (todos)
     escala: float
     roteiro: str  # variante do roteiro de teste: "teste" ou "embarque_sujo"
     passos: tuple[tuple[str, object], ...]
@@ -117,42 +108,36 @@ class Geracao:
 
 # Gerações da execução padrão.
 PRINCIPAL = Geracao(  # carga inicial e avanço até o reajuste de tarifas (12/01/2026)
-    "principal", "90-sistemas", 0.05, "teste", (("gerar", CARGA_INICIAL), ("avancar", 12)),
+    "principal", SISTEMAS, 0.05, "teste", (("gerar", CARGA_INICIAL), ("avancar", 12)),
 )
 LEGADOS = Geracao(  # até a segunda-feira 05/01/2026, com o Embarque sujo (test_defeitos)
-    "legados", "91-legados", 0.1, "embarque_sujo", (("gerar", date(2026, 1, 5)),),
+    "legados", ("embarque", "solticket", "solfin"), 0.1, "embarque_sujo", (("gerar", date(2026, 1, 5)),),
 )
-PATIO = Geracao("patio", "92-patio", 0.2, "teste", (("gerar", date(2026, 1, 3)),))
-LIMPA = Geracao(  # a carga inicial da PRINCIPAL numa fatia sem gabarito (e, portanto, sem defeitos)
-    "limpa", "95-limpa", 0.05, "teste", (("gerar", CARGA_INICIAL),),
-)
+PATIO = Geracao("patio", ("patio",), 0.2, "teste", (("gerar", date(2026, 1, 3)),))
 
 # Gerações dos testes marcados como `lento`.
+# O Rastro e o IBGE dependem da data da carga inicial (janela de telemetria e data do arquivo
+# de municípios), então não entram na comparação da geração em partes.
 PRINCIPAL_EM_PARTES = Geracao(  # mesma história da PRINCIPAL, cortada em outros pontos
-    "principal_em_partes", "94-partes", 0.05, "teste",
+    "principal_em_partes", ("embarque", "nucleo", "rotacerta", "apolice", "passagemhub"), 0.05, "teste",
     (("gerar", date(2026, 1, 9)), ("avancar", 1), ("avancar", 2)),
 )
 LEGADOS_EM_PARTES = Geracao(  # véspera da aquisição e uma semana de avanço
-    "legados_em_partes", "98-legados", 0.1, "embarque_sujo", (("gerar", date(2025, 6, 30)), ("avancar", 7)),
+    "legados_em_partes", ("solticket", "solfin"), 0.1, "embarque_sujo",
+    (("gerar", date(2025, 6, 30)), ("avancar", 7)),
 )
 PATIO_EM_PARTES = Geracao(  # o avanço atravessa o fim do período diário fechado (31/12/2025)
-    "patio_em_partes", "92-patio", 0.2, "teste", (("gerar", date(2025, 12, 30)), ("avancar", 4)),
+    "patio_em_partes", ("patio",), 0.2, "teste", (("gerar", date(2025, 12, 30)), ("avancar", 4)),
 )
-MUNDO = Geracao("mundo", "93-mundo", 0.05, "teste", (("gerar", CARGA_INICIAL),))
-# Fatias inteiras dos artigos (as fatias oficiais do roteiro).
-ESCALA_FATIA_INTEIRA = 0.03
+MUNDO = Geracao("mundo", ("ibge",), 0.05, "teste", (("gerar", CARGA_INICIAL),))
+# A carga oficial do roteiro, como o `00_setup` a grava: todos os sistemas.
+ESCALA_CARGA_COMPLETA = 0.03
 # Escala mínima do projeto (test_escala_minima): a Viação tem de ter rota e, portanto, passagens.
 ESCALA_MINIMA = 0.01
-FATIA_01_MINIMA = Geracao(
-    "fatia_01_minima", "01-bronze", ESCALA_MINIMA, "teste", (("gerar", CARGA_INICIAL),),
+CARGA_COMPLETA = Geracao(  # carga inicial e avanço de 1 dia (test_carga_inicial)
+    "carga_completa", None, ESCALA_CARGA_COMPLETA, "teste", (("gerar", CARGA_INICIAL), ("avancar", 1)),
 )
-FATIA_01 = Geracao(  # carga inicial e avanço de 1 dia (test_gerar_fatia)
-    "fatia_01", "01-bronze", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL), ("avancar", 1)),
-)
-FATIA_02 = Geracao("fatia_02", "02-historizacao", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
-FATIA_03 = Geracao("fatia_03", "03-3fn", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
-FATIA_05 = Geracao("fatia_05", "05-raw-vault", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
-FATIA_10 = Geracao("fatia_10", "10-data-marts", ESCALA_FATIA_INTEIRA, "teste", (("gerar", CARGA_INICIAL),))
+CARGA_MINIMA = Geracao("carga_minima", None, ESCALA_MINIMA, "teste", (("gerar", CARGA_INICIAL),))
 
 
 @dataclass(frozen=True)
@@ -177,7 +162,7 @@ def obter(geracao: Geracao, pasta_temporaria: Path, obter_spark, usar_cache: boo
     `obter_spark` só é chamado quando a geração precisa rodar: com o cache cheio, os testes
     rodam sem abrir sessão no workspace.
     """
-    roteiro = texto_do_roteiro(geracao.roteiro)
+    roteiro = texto_do_roteiro(geracao.roteiro, geracao.sistemas)
     pasta = CACHE / f"{geracao.nome}-{_chave(geracao, roteiro)[:16]}"
     if usar_cache and (pasta / "resultados.json").exists():
         return _ler(pasta, geracao)
@@ -207,14 +192,13 @@ def obter(geracao: Geracao, pasta_temporaria: Path, obter_spark, usar_cache: boo
 
 def _executar(geracao: Geracao, trabalho: Path, spark) -> None:
     caminho_roteiro = trabalho / "roteiro.yaml"
-    destino = DestinoLocal(trabalho / "destino", geracao.artigo, AMBIENTE)
+    destino = DestinoLocal(trabalho / "destino", AMBIENTE)
     resultados = []
     for indice, (passo, valor) in enumerate(geracao.passos):
         if passo == "gerar":
-            r = gerar_fatia(geracao.artigo, destino, escala=geracao.escala, ate=valor, spark=spark,
-                            roteiro=caminho_roteiro)
+            r = gerar_carga_inicial(destino, escala=geracao.escala, ate=valor, spark=spark, roteiro=caminho_roteiro)
         else:
-            r = avancar_tempo(geracao.artigo, destino, valor, spark=spark, roteiro=caminho_roteiro)
+            r = avancar_tempo(destino, valor, spark=spark, roteiro=caminho_roteiro)
         resultados.append({**asdict(r), "data_relogio": r.data_relogio.isoformat()})
         shutil.copytree(destino.raiz, trabalho / f"etapa-{indice}")
     shutil.rmtree(trabalho / "destino")
@@ -227,7 +211,7 @@ def _ler(pasta: Path, geracao: Geracao) -> Gerada:
     resultados = json.loads((pasta / "resultados.json").read_text(encoding="utf-8"))
     return Gerada(
         roteiro=roteiro,
-        etapas=tuple(DestinoLocal(pasta / f"etapa-{i}", geracao.artigo, AMBIENTE) for i in range(len(geracao.passos))),
+        etapas=tuple(DestinoLocal(pasta / f"etapa-{i}", AMBIENTE) for i in range(len(geracao.passos))),
         resultados=tuple(Resultado(**{**r, "data_relogio": date.fromisoformat(r["data_relogio"])}) for r in resultados),
     )
 
@@ -247,11 +231,9 @@ def _chave(geracao: Geracao, roteiro: str) -> str:
 
 
 def roteiro_so_ibge():
-    """O roteiro oficial com a fatia 01-bronze reduzida ao IBGE: para testar onde um destino
-    grava (Unity Catalog), sem pagar a geração dos sistemas."""
-    roteiro = carregar_roteiro()
-    fatia = roteiro.fatias["01-bronze"].model_copy(update={"sistemas": ["ibge"]})
-    return roteiro.model_copy(update={"fatias": {**roteiro.fatias, "01-bronze": fatia}})
+    """O roteiro oficial com a carga reduzida ao IBGE: para testar onde um destino grava
+    (Unity Catalog), sem pagar a geração dos sistemas."""
+    return carregar_roteiro().model_copy(update={"carga": Carga(sistemas=["ibge"])})
 
 
 # Leitura do que foi gravado (comum aos módulos de teste).
@@ -275,7 +257,7 @@ def arvore(destino: DestinoLocal) -> dict[str, bytes]:
 
 def gabarito(destino: DestinoLocal, sistema: str | None = None) -> dict[str, list[dict]]:
     """Tabelas do gabarito (todas as partes de cada uma). Com `sistema`, `mapa_chaves` e
-    `defeitos` ficam só com as linhas dele (a fatia de teste tem vários sistemas)."""
+    `defeitos` ficam só com as linhas dele (a carga de teste tem vários sistemas)."""
     pasta = destino.pasta_gabarito()
     tabelas = {
         p.name: [r for parte in sorted(p.glob("*.parquet")) for r in pq.read_table(parte).to_pylist()]

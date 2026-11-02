@@ -1,7 +1,7 @@
 """*Rastro* (telemetria da holding): muitos arquivos pequenos de JSON aninhado na landing.
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam. Usa a geração `principal`
-(ver `geracoes.py`), compartilhada com os outros sistemas, cuja fatia de teste tem gabarito
+Observado só pelo que `gerar_carga_inicial`/`avancar_tempo` gravam. Usa a geração `principal`
+(ver `geracoes.py`), compartilhada com os outros sistemas, cuja carga de teste tem gabarito
 e a janela de telemetria de 90 dias do Estudo de Caso.
 """
 
@@ -47,7 +47,7 @@ def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
 def gerado(principal):
     """Carga inicial e avanço de 12 dias (geração `principal`)."""
     roteiro = carregar_roteiro(principal.roteiro)
-    assert roteiro.fatia(geracoes.PRINCIPAL.artigo).janela_telemetria_dias == JANELA_DIAS
+    assert roteiro.parametros.telemetria_dias_carga_inicial == JANELA_DIAS
     assert principal.resultados[-1].data_relogio == CARGA_INICIAL + timedelta(days=DIAS_AVANCADOS)
     destino = principal.final
     return destino, _arquivos(principal.etapas[0]), _arquivos(destino), _gabarito(destino), roteiro

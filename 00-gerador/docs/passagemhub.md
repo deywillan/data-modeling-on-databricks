@@ -9,7 +9,7 @@ Marketplace que vende passagens das linhas da ModelBricks Viação pelo app e pe
 | Arquivos | uma página por arquivo: `passagemhub/eventos_venda/<AAAA-MM-DD>/eventos_venda_<AAAAMMDD>_<página>.json` |
 | Entidade | `eventos_venda` |
 | Volume (escala 1) | cerca de 240 mil pedidos em 2024 e 2025 (40% das vendas da Viação) |
-| Fatias | 01, 04, 05, 06, 07 e 10 |
+| Artigos | 01, 04, 05, 06, 07 e 10 |
 
 ## Diagrama ER
 
@@ -153,7 +153,7 @@ A partir de **05/01/2026**, todo evento traz o objeto `pagamento`. Antes dessa d
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|

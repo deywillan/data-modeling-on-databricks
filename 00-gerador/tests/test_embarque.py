@@ -1,7 +1,7 @@
 """*Embarque* (bilhetagem da ModelBricks Viação): lotes CDC em JSON na landing.
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e, nas
-fatias com gabarito, as tabelas do schema `gabarito`.
+Observado só pelo que `gerar_carga_inicial`/`avancar_tempo` gravam: os arquivos da landing e as
+tabelas do schema `gabarito`.
 
 Usa a geração `principal` (compartilhada, ver `geracoes.py`): o *Embarque* com as taxas do
 roteiro oficial, carga inicial e avanço até o dia do reajuste de tarifas.
@@ -61,7 +61,7 @@ def _aplicar(operacoes: list[dict], ate: date | None = None) -> dict[str, dict]:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do Embarque (a fatia
+    """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do Embarque (a carga
     tem outros sistemas)."""
     return geracoes.gabarito(destino, "embarque")
 
@@ -204,7 +204,7 @@ def test_reajuste_de_tarifas_do_roteiro_atualiza_todas_as_tarifas_em_12_01_2026(
 @pytest.mark.lento
 def test_gerar_sistema_ou_dia_isoladamente_produz_o_mesmo_conteudo(com_gabarito, principal_em_partes):
     _, carga, completo = com_gabarito
-    # Outra fatia (sem o Rastro), carga até 09/01/2026, um avanço de 1 dia e outro de 2.
+    # Outra carga (sem o Rastro), carga até 09/01/2026, um avanço de 1 dia e outro de 2.
     em_partes = _arquivos_embarque(principal_em_partes.final)
 
     assert em_partes == completo

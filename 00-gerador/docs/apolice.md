@@ -2,14 +2,13 @@
 
 Sistema de apólices da corretora do grupo. Como o [*Núcleo*](nucleo.md), entrega **incremental por `updated_at`**, mas em CSV e sem *soft delete*: o fim de uma apólice é uma mudança de `status`. Os valores monetários chegam como texto no formato brasileiro (`1.234,56`).
 
-| | |
-|---|---|
-| Schema na Bronze | `apolice` |
-| Formato | CSV com cabeçalho, separador `,`, UTF-8. Textos entre aspas, nulos como campo vazio, datas `AAAA-MM-DD` e instantes `AAAA-MM-DD HH:MM:SS` |
-| Arquivos | um por entidade e dia com mudanças: `apolice/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.csv` |
-| Entidades | `segurados`, `apolices` |
-| Volume (escala 1) | 8 mil apólices avulsas em 2024 e 2025, mais as vendidas junto com veículos |
-| Fatias | 03 e 10 |
+| Schema na Bronze  | `apolice`                                                                                                                                 |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato           | CSV com cabeçalho, separador `,`, UTF-8. Textos entre aspas, nulos como campo vazio, datas `AAAA-MM-DD` e instantes `AAAA-MM-DD HH:MM:SS` |
+| Arquivos          | um por entidade e dia com mudanças: `apolice/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.csv`                                      |
+| Entidades         | `segurados`, `apolices`                                                                                                                   |
+| Volume (escala 1) | 8 mil apólices avulsas em 2024 e 2025, mais as vendidas junto com veículos                                                                |
+| Artigos            | 01, 03 e 10 |
 
 ## Diagrama ER
 
@@ -92,7 +91,7 @@ Fato do sistema, de duas origens:
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|
@@ -106,5 +105,3 @@ As apólices vendidas com veículos se ligam ao mundo pela `placa`.
 |---|---|---|
 | Valor monetário como texto | coluna inteira | `importancia_segurada` e `premio` no formato brasileiro (`1.234,56`), em todas as linhas. Registrado uma vez por arquivo e coluna, com um exemplo do valor sujo e do original. |
 | CPF fora do padrão | 5% dos segurados PF | CPF com máscara (`000.000.000-00`) ou sem os zeros à esquerda. |
-
-O *Apólice+* só aparece em fatias com gabarito. Numa fatia sem gabarito, os valores monetários sairiam como número.

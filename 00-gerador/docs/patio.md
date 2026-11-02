@@ -9,7 +9,7 @@ Sistema de gestão da concessionária de ônibus e caminhões (DMS): estoque, ve
 | Arquivos | um por entidade e data de foto: `patio/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.csv` |
 | Entidades | `lojas`, `clientes`, `veiculos`, `vendas`, `ordens_servico` |
 | Volume (escala 1) | 3 mil vendas de veículos e cerca de 12 mil ordens de serviço em 2024 e 2025 |
-| Fatias | 01, 02, 03, 08 e 10 |
+| Artigos | 01, 02, 03, 08 e 10 |
 
 ## Diagrama ER
 
@@ -163,7 +163,7 @@ Cerca de 3% das ordens são canceladas. A ordem cancelada é **excluída** do DM
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|

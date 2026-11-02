@@ -9,7 +9,7 @@ Sistema de venda de passagens do Expresso Vale do Sol, empresa de ônibus adquir
 | Arquivos | um por entidade e data de foto: `solticket/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.csv` |
 | Entidades | `clientes`, `linhas`, `passagens` |
 | Volume (escala 1) | 150 mil passagens na carga histórica (01/01/2024 a 30/06/2025), no mesmo ritmo depois |
-| Fatias | 05, 06 e 10 |
+| Artigos | 01, 05, 06 e 10 |
 
 ## Diagrama ER
 
@@ -105,7 +105,7 @@ Fato do sistema: passagens vendidas no guichê e por telefone.
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|

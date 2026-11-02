@@ -1,14 +1,14 @@
 """Destino: onde o gerador guarda o que produziu.
 
 O destino não gera nem serializa nada: recebe bytes prontos do escritor único e os guarda
-nos Volumes do catálogo Bronze do artigo, e recebe DataFrames do gabarito para gravar como
+nos Volumes do catálogo Bronze da série, e recebe DataFrames do gabarito para gravar como
 tabelas no catálogo Silver. Há duas implementações: diretório local (testes) e Unity Catalog
 (jobs no workspace). As duas seguem a mesma estrutura:
 
-    aNN_bronze_<amb>/<sistema>/landing/<entidade>/<data>/<arquivo>   Volume `landing` de cada sistema
-    aNN_bronze_<amb>/_controle/relogio/<data>.json                  relógio simulado
-    aNN_silver_<amb>/gabarito/<tabela>                              só nas fatias com gabarito
-    aNN_gold_<amb>/                                                 nasce vazio
+    bronze_<amb>/<sistema>/landing/<entidade>/<data>/<arquivo>   Volume `landing` de cada sistema
+    bronze_<amb>/_controle/relogio/<data>.json                  relógio simulado
+    silver_<amb>/gabarito/<tabela>                              mundo verdadeiro, chaves e defeitos
+    gold_<amb>/                                                 nasce vazio
 
 Os caminhos de arquivo do contrato começam pelo sistema (ex.:
 `ibge/municipios/2025-12-31/municipios_20251231_0001.csv`) ou por `_controle/relogio/`, com `/`
@@ -22,7 +22,7 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from .catalogos import catalogos_do_artigo, validar_ambiente
+from .catalogos import catalogos_da_serie, validar_ambiente
 from .escritor import Arquivo
 
 if TYPE_CHECKING:
@@ -72,13 +72,12 @@ def caminho_do_contrato(local: Local) -> str:
 class Destino(Protocol):
     """Contrato que toda implementação de destino cumpre."""
 
-    artigo: str  # artigo a que o destino pertence (ex.: `03-3fn`)
     ambiente: str  # ambiente dos catálogos (ex.: `dev`)
 
-    def preparar(self, sistemas: Sequence[str], gabarito: bool = False, reset: bool = False) -> None:
-        """Cria o que faltar: os três catálogos do artigo, um schema por sistema (com o Volume
-        `landing`), o schema de controle (com o Volume do relógio) e, com `gabarito`, o schema
-        `gabarito` no Silver. Com `reset`, apaga os três catálogos antes."""
+    def preparar(self, sistemas: Sequence[str], reset: bool = False) -> None:
+        """Cria o que faltar: os três catálogos da série, um schema por sistema no Bronze (com o
+        Volume `landing`), o schema de controle (com o Volume do relógio) e o schema `gabarito`
+        no Silver. Com `reset`, apaga os três catálogos antes."""
 
     def gravar_arquivos(self, arquivos: Iterable[Arquivo]) -> None:
         """Grava arquivos novos na landing, sem nunca sobrescrever. Um arquivo que já existe
@@ -106,15 +105,14 @@ class DestinoLocal:
 
     Layout: `<raiz>/<catálogo>/<schema>/<volume>/...`, com os mesmos nomes do Unity Catalog
     (veja o cabeçalho do módulo). Cada tabela do gabarito vira uma pasta
-    `<raiz>/aNN_silver_<amb>/gabarito/<tabela>/parte-0000.parquet`. Ambientes e artigos
-    diferentes convivem na mesma raiz, em catálogos de nomes diferentes.
+    `<raiz>/silver_<amb>/gabarito/<tabela>/parte-0000.parquet`. Ambientes diferentes convivem
+    na mesma raiz, em catálogos de nomes diferentes.
     """
 
-    def __init__(self, raiz: str | Path, artigo: str, ambiente: str = "dev"):
+    def __init__(self, raiz: str | Path, ambiente: str = "dev"):
         self.raiz = Path(raiz)
-        self.artigo = artigo
         self.ambiente = validar_ambiente(ambiente)
-        self.catalogos = catalogos_do_artigo(artigo, ambiente)
+        self.catalogos = catalogos_da_serie(ambiente)
 
     def pasta(self, camada: str) -> Path:
         """Pasta do catálogo da camada (`bronze`, `silver` ou `gold`)."""
@@ -127,7 +125,7 @@ class DestinoLocal:
     def pasta_gabarito(self) -> Path:
         return self.pasta("silver") / SCHEMA_GABARITO
 
-    def preparar(self, sistemas: Sequence[str], gabarito: bool = False, reset: bool = False) -> None:
+    def preparar(self, sistemas: Sequence[str], reset: bool = False) -> None:
         if reset:
             for camada in self.catalogos:
                 shutil.rmtree(self.pasta(camada), ignore_errors=True)
@@ -136,8 +134,7 @@ class DestinoLocal:
         for sistema in sistemas:
             self.pasta_sistema(sistema).mkdir(parents=True, exist_ok=True)
         (self.pasta("bronze") / SCHEMA_CONTROLE / VOLUME_RELOGIO).mkdir(parents=True, exist_ok=True)
-        if gabarito:
-            self.pasta_gabarito().mkdir(parents=True, exist_ok=True)
+        self.pasta_gabarito().mkdir(parents=True, exist_ok=True)
 
     def gravar_arquivos(self, arquivos: Iterable[Arquivo]) -> None:
         for arquivo in arquivos:
@@ -145,7 +142,7 @@ class DestinoLocal:
             if not (self.pasta("bronze") / local.schema).is_dir():
                 raise ValueError(
                     f"O schema '{local.schema}' não existe no catálogo {self.catalogos['bronze']}: "
-                    f"o sistema não faz parte da fatia de {self.artigo}."
+                    "o sistema não faz parte da carga."
                 )
             alvo = self._caminho(arquivo.caminho)
             alvo.parent.mkdir(parents=True, exist_ok=True)

@@ -14,12 +14,12 @@ from datetime import date, timedelta
 import geracoes
 import pytest
 
-from modelbricks_gerador import DestinoLocal, avancar_tempo, gerar_fatia
+from modelbricks_gerador import DestinoLocal, avancar_tempo, gerar_carga_inicial
 
 CARGA_INICIAL = date(2025, 12, 31)
 ULTIMO_DIA = date(2026, 1, 12)
 DIAS_NOVOS = {(CARGA_INICIAL + timedelta(days=i)).isoformat() for i in range(1, 13)}
-SISTEMAS_EM_PARTES = geracoes.FATIAS_DE_TESTE["94-partes"]["sistemas"]
+SISTEMAS_EM_PARTES = geracoes.PRINCIPAL_EM_PARTES.sistemas
 
 
 _conteudo = geracoes.conteudo
@@ -51,9 +51,9 @@ def test_avancar_cria_so_arquivos_novos_e_move_o_relogio(principal, tmp_path):
     assert {p.name for p in destino.pasta("silver").iterdir()} == {"gabarito"}, "no Silver, só o gabarito"
 
     # Uma nova carga inicial no mesmo destino não muda nada (cópia: a geração pode estar no cache).
-    copia = DestinoLocal(tmp_path / "copia", "90-sistemas", geracoes.AMBIENTE)
+    copia = DestinoLocal(tmp_path / "copia", geracoes.AMBIENTE)
     shutil.copytree(destino.raiz, copia.raiz)
-    de_novo = gerar_fatia("90-sistemas", copia, escala=0.05, roteiro=principal.roteiro)
+    de_novo = gerar_carga_inicial(copia, escala=0.05, roteiro=principal.roteiro)
     assert (de_novo.gerou, de_novo.data_relogio) == (False, ULTIMO_DIA)
     assert geracoes.arvore(copia) == geracoes.arvore(destino)
 
@@ -102,14 +102,14 @@ def test_mapa_de_chaves_cobre_as_chaves_entregues_pelo_avanco(principal):
 
 def test_avancar_sem_carga_inicial_falha_com_orientacao(destino):
     # A falha vem antes de abrir a sessão Spark: não consome cota.
-    with pytest.raises(RuntimeError, match="gerar_fatia"):
-        avancar_tempo("01-bronze", destino, 1)
+    with pytest.raises(RuntimeError, match="gerar_carga_inicial"):
+        avancar_tempo(destino, 1)
 
 
 def test_job_rejeita_dias_menor_que_um_antes_de_abrir_sessao(capsys):
     from modelbricks_gerador import cli
 
     with pytest.raises(SystemExit):
-        cli.avancar_tempo(["--artigo", "01-bronze", "--ambiente", "dev", "--dias", "0"])
+        cli.avancar_tempo(["--ambiente", "dev", "--dias", "0"])
 
     assert "dias deve ser pelo menos 1" in capsys.readouterr().err

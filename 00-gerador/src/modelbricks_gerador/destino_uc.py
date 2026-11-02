@@ -1,4 +1,4 @@
-"""Destino no Unity Catalog: três catálogos por artigo, um schema por sistema e o gabarito no Silver.
+"""Destino no Unity Catalog: os três catálogos da série, um schema por sistema e o gabarito no Silver.
 
 Funciona igual na máquina local (Databricks Connect) e dentro do job serverless:
 
@@ -7,9 +7,10 @@ Funciona igual na máquina local (Databricks Connect) e dentro do job serverless
   paralelo, com a não-sobrescrita garantida pelo próprio serviço;
 - gabarito com `saveAsTable`, direto do DataFrame, sem coletar.
 
-Estrutura (veja o cabeçalho de `destino.py`): `aNN_bronze_<amb>.<sistema>.landing` para os
-arquivos de cada sistema, `aNN_bronze_<amb>._controle.relogio` para o relógio e
-`aNN_silver_<amb>.gabarito` para as tabelas do gabarito. O Silver e o Gold nascem sem tabelas.
+Estrutura (veja o cabeçalho de `destino.py`): `bronze_<amb>.<sistema>.landing` para os
+arquivos de cada sistema, `bronze_<amb>._controle.relogio` para o relógio e
+`silver_<amb>.gabarito` para as tabelas do gabarito. Fora o gabarito, o Silver e o Gold nascem
+sem tabelas: quem os popula são os pipelines dos artigos.
 """
 
 import io
@@ -18,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import TYPE_CHECKING
 
-from .catalogos import catalogos_do_artigo, validar_ambiente
+from .catalogos import catalogos_da_serie, validar_ambiente
 from .destino import (
     SCHEMA_CONTROLE,
     SCHEMA_GABARITO,
@@ -44,8 +45,8 @@ _SCHEMAS_DO_SISTEMA = {"information_schema", "default"}  # criados pelo Unity Ca
 
 
 class DestinoUC:
-    """Destino no Unity Catalog para os três catálogos de um artigo em um ambiente
-    (ex.: `03-3fn` e `dev` → `a03_bronze_dev`, `a03_silver_dev`, `a03_gold_dev`).
+    """Destino no Unity Catalog para os três catálogos da série em um ambiente
+    (ex.: `dev` → `bronze_dev`, `silver_dev`, `gold_dev`).
 
     `spark` e `workspace` são opcionais: sem eles, usa a sessão e o cliente do ambiente
     (o job serverless ou o perfil local da CLI).
@@ -53,21 +54,19 @@ class DestinoUC:
 
     def __init__(
         self,
-        artigo: str,
         ambiente: str = "dev",
         *,
         spark: "SparkSession | None" = None,
         workspace: "WorkspaceClient | None" = None,
     ):
-        self.artigo = artigo
         self.ambiente = validar_ambiente(ambiente)
-        self.catalogos = catalogos_do_artigo(artigo, ambiente)
+        self.catalogos = catalogos_da_serie(ambiente)
         self._spark = spark
         self._workspace = workspace
 
     # --- contrato Destino -------------------------------------------------------------
 
-    def preparar(self, sistemas: Sequence[str], gabarito: bool = False, reset: bool = False) -> None:
+    def preparar(self, sistemas: Sequence[str], reset: bool = False) -> None:
         if reset:
             self._em_paralelo(self._apagar_catalogo, self.catalogos.values())
         self._em_paralelo(self._criar_catalogo, self.catalogos.values())
@@ -75,8 +74,7 @@ class DestinoUC:
         volumes = [(bronze, sistema, VOLUME_LANDING) for sistema in sistemas]
         volumes.append((bronze, SCHEMA_CONTROLE, VOLUME_RELOGIO))
         self._em_paralelo(lambda v: self._criar_schema(*v), volumes)
-        if gabarito:
-            self._sql(f"CREATE SCHEMA IF NOT EXISTS {silver}.{SCHEMA_GABARITO}")
+        self._sql(f"CREATE SCHEMA IF NOT EXISTS {silver}.{SCHEMA_GABARITO}")
 
     def gravar_arquivos(self, arquivos: Iterable[Arquivo]) -> None:
         from databricks.sdk.errors import AlreadyExists
@@ -130,7 +128,7 @@ class DestinoUC:
     # --- onde as coisas ficam ---------------------------------------------------------
 
     def raiz_do_volume(self, schema: str, volume: str = VOLUME_LANDING) -> str:
-        """Raiz de um Volume do Bronze, ex.: `/Volumes/a01_bronze_dev/embarque/landing`."""
+        """Raiz de um Volume do Bronze, ex.: `/Volumes/bronze_dev/embarque/landing`."""
         return f"/Volumes/{self.catalogos['bronze']}/{schema}/{volume}"
 
     @property

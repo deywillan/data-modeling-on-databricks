@@ -9,7 +9,7 @@ Sistema de gestão de transporte (TMS) da ModelBricks Cargas: clientes, caminhõ
 | Arquivos | um por entidade e dia simulado: `rotacerta/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.json` |
 | Entidades | `clientes`, `caminhoes`, `fretes` |
 | Volume (escala 1) | 60 mil fretes em 2024 e 2025, com 5 a 8 operações cada |
-| Fatias | 02, 04, 09 e 10 |
+| Artigos | 01, 02, 04, 09 e 10 |
 
 ## Diagrama ER
 
@@ -130,7 +130,7 @@ stateDiagram-v2
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|

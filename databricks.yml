@@ -2,10 +2,12 @@
 #
 # Sem host nem perfil fixos: use o perfil da sua CLI, por exemplo
 #   databricks bundle deploy -p <seu-perfil>
-#   databricks bundle run 01_setup -p <seu-perfil>
+#   databricks bundle run 00_setup -p <seu-perfil>
 #
-# Cada pasta de artigo declara os próprios recursos em <pasta>/resources/, e cada artigo
-# roda isoladamente. O gerador de dados (00-gerador/) vira um wheel construído no deploy.
+# A série constrói um único lakehouse, em ordem: o 00_setup (em 00-gerador/) grava as landings
+# de todos os sistemas, e cada pasta de artigo declara em <pasta>/resources/ o pipeline que
+# acrescenta a sua parte, lendo o que os artigos anteriores construíram. O gerador de dados
+# vira um wheel construído no deploy.
 
 bundle:
   name: data-modeling-on-databricks
@@ -13,8 +15,8 @@ bundle:
 include:
   - "*/resources/*.yml"
 
-# Cada artigo tem três catálogos, um por camada: aNN_bronze_<ambiente>, aNN_silver_<ambiente> e
-# aNN_gold_<ambiente>. O ambiente vem do target (abaixo): dev gera _dev e prod gera _prd.
+# A série tem três catálogos, um por camada: bronze_<ambiente>, silver_<ambiente> e
+# gold_<ambiente>. O ambiente vem do target (abaixo): dev gera _dev e prod gera _prd.
 variables:
   ambiente:
     description: Ambiente no fim do nome dos catálogos. Cada target define o seu valor.

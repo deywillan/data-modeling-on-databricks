@@ -14,7 +14,7 @@ dependencies = [
 
 [project.scripts]
 # Pontos de entrada dos jobs do bundle (python_wheel_task).
-gerar_fatia = "modelbricks_gerador.cli:gerar_fatia"
+gerar_carga_inicial = "modelbricks_gerador.cli:gerar_carga_inicial"
 avancar_tempo = "modelbricks_gerador.cli:avancar_tempo"
 
 [dependency-groups]

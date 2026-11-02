@@ -11,7 +11,7 @@ Custo: cada geração consome a cota diária do workspace. As gerações ficam e
 e são pedidas pelas fixtures de sessão abaixo, então cada uma roda no máximo uma vez por
 sessão e fica no cache local entre sessões (`--sem-cache` ignora o cache). A execução padrão
 deixa de fora os testes marcados como `lento` (gerações extras para comparar determinismo e
-geração em partes, fatias inteiras, Unity Catalog). Rode-os nos tickets de marco com
+geração em partes, carga completa, Unity Catalog). Rode-os nos tickets de marco com
 `pytest -m "lento or not lento"`.
 
 Pré-aquecimento: as gerações que os testes selecionados pedem rodam em paralelo (até
@@ -35,6 +35,7 @@ from falsos import SISTEMAS_FALSOS, projecao_falsa
 
 from modelbricks_gerador import DestinoLocal
 from modelbricks_gerador.sistemas import PROJECOES
+from modelbricks_gerador.sistemas.base import Contexto
 
 
 GERACOES_EM_PARALELO = 3
@@ -42,16 +43,11 @@ GERACOES_EM_PARALELO = 3
 _GERACOES = {
     "principal_em_partes": geracoes.PRINCIPAL_EM_PARTES,
     "principal": geracoes.PRINCIPAL,
-    "fatia_10": geracoes.FATIA_10,
-    "fatia_01": geracoes.FATIA_01,
-    "fatia_01_minima": geracoes.FATIA_01_MINIMA,
-    "fatia_02": geracoes.FATIA_02,
-    "fatia_03": geracoes.FATIA_03,
+    "carga_completa": geracoes.CARGA_COMPLETA,
+    "carga_minima": geracoes.CARGA_MINIMA,
     "legados": geracoes.LEGADOS,
     "legados_em_partes": geracoes.LEGADOS_EM_PARTES,
-    "fatia_05": geracoes.FATIA_05,
     "patio": geracoes.PATIO,
-    "limpa": geracoes.LIMPA,
     "patio_em_partes": geracoes.PATIO_EM_PARTES,
     "mundo_de_novo": geracoes.MUNDO,
 }
@@ -115,13 +111,21 @@ def spark():
 @pytest.fixture
 def destino(tmp_path):
     """Destino em diretório local, isolado por teste."""
-    return DestinoLocal(tmp_path / "workspace_teste", "01-bronze", "t1")
+    return DestinoLocal(tmp_path / "workspace_teste", "t1")
 
 
 @pytest.fixture
-def sistemas_falsos(monkeypatch):
-    """Registra os sistemas falsos em `PROJECOES` (só durante o teste). Devolve a função que os
-    registra de novo, com `defeitos=True`, quando o teste precisa de defeitos para o gabarito."""
+def mundo_vazio(monkeypatch):
+    """Troca o mundo verdadeiro por um vazio (só durante o teste): a carga inicial grava o
+    gabarito, e gerar o mundo precisaria de Spark."""
+    monkeypatch.setattr(Contexto, "mundo", property(lambda _: {}))
+
+
+@pytest.fixture
+def sistemas_falsos(monkeypatch, mundo_vazio):
+    """Registra os sistemas falsos em `PROJECOES`, com o mundo vazio (só durante o teste).
+    Devolve a função que os registra de novo, com `defeitos=True`, quando o teste precisa de
+    defeitos para o gabarito."""
 
     def registrar(defeitos: bool = False):
         for sistema in SISTEMAS_FALSOS:
@@ -148,7 +152,7 @@ def _obter(geracao: geracoes.Geracao, request, tmp_path_factory) -> geracoes.Ger
 
 @pytest.fixture(scope="session")
 def principal(request, tmp_path_factory):
-    """Fatia de teste com Embarque (taxas oficiais), Núcleo, RotaCerta, Apólice+, PassagemHub
+    """Carga de teste com Embarque (taxas oficiais), Núcleo, RotaCerta, Apólice+, PassagemHub
     e Rastro na escala 0,05: carga inicial até 31/12/2025 e avanço de 12 dias de uma vez."""
     return _obter(geracoes.PRINCIPAL, request, tmp_path_factory)
 
@@ -163,13 +167,6 @@ def legados(request, tmp_path_factory):
 def patio(request, tmp_path_factory):
     """Pátio na escala 0,2 (população de clientes para medir taxas), até 03/01/2026."""
     return _obter(geracoes.PATIO, request, tmp_path_factory)
-
-
-@pytest.fixture(scope="session")
-def limpa(request, tmp_path_factory):
-    """Os sistemas da `principal` (mais o Pátio) numa fatia sem gabarito, na escala 0,05, só a
-    carga inicial: a mesma história da `principal`, sem nenhum defeito injetado."""
-    return _obter(geracoes.LIMPA, request, tmp_path_factory)
 
 
 # Gerações usadas só por testes marcados como `lento`.
@@ -191,39 +188,15 @@ def patio_em_partes(request, tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def fatia_01(request, tmp_path_factory):
-    """Fatia 01-bronze inteira do artigo: carga inicial e avanço de 1 dia."""
-    return _obter(geracoes.FATIA_01, request, tmp_path_factory)
+def carga_completa(request, tmp_path_factory):
+    """A carga do roteiro (todos os sistemas, como o `00_setup`): carga inicial e avanço de 1 dia."""
+    return _obter(geracoes.CARGA_COMPLETA, request, tmp_path_factory)
 
 
 @pytest.fixture(scope="session")
-def fatia_01_minima(request, tmp_path_factory):
-    """Fatia 01-bronze na escala mínima do projeto (0,01), só a carga inicial."""
-    return _obter(geracoes.FATIA_01_MINIMA, request, tmp_path_factory)
-
-
-@pytest.fixture(scope="session")
-def fatia_02(request, tmp_path_factory):
-    """Fatia 02-historizacao inteira (Pátio, Embarque, Núcleo e RotaCerta), sem gabarito."""
-    return _obter(geracoes.FATIA_02, request, tmp_path_factory)
-
-
-@pytest.fixture(scope="session")
-def fatia_03(request, tmp_path_factory):
-    """Fatia 03-3fn inteira (Núcleo, Embarque, Pátio e Apólice+), com gabarito."""
-    return _obter(geracoes.FATIA_03, request, tmp_path_factory)
-
-
-@pytest.fixture(scope="session")
-def fatia_05(request, tmp_path_factory):
-    """Fatia 05-raw-vault inteira (a 06-business-vault tem os mesmos sistemas)."""
-    return _obter(geracoes.FATIA_05, request, tmp_path_factory)
-
-
-@pytest.fixture(scope="session")
-def fatia_10(request, tmp_path_factory):
-    """Fatia 10-data-marts inteira (todos os sistemas)."""
-    return _obter(geracoes.FATIA_10, request, tmp_path_factory)
+def carga_minima(request, tmp_path_factory):
+    """A carga do roteiro na escala mínima do projeto (0,01), só a carga inicial."""
+    return _obter(geracoes.CARGA_MINIMA, request, tmp_path_factory)
 
 
 @pytest.fixture(scope="session")

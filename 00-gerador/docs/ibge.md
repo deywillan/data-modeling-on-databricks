@@ -9,7 +9,7 @@ Dado público de referência, não é um sistema do grupo. É a lista oficial de
 | Arquivo | um só, na carga inicial: `ibge/municipios/2025-12-31/municipios_20251231_0001.csv` |
 | Entidade | `municipios` |
 | Volume | 5.571 municípios, 27 UFs e 5 regiões, independentemente da escala |
-| Fatias | 01, 08 e 10 |
+| Artigos | 01, 08 e 10 |
 
 O arquivo vem versionado no pacote do gerador (`src/modelbricks_gerador/dados/ibge_municipios.csv`), extraído da [API de Localidades do IBGE](https://servicodados.ibge.gov.br/api/docs/localidades) pelo script `scripts/extrair_ibge.py`. O setup não depende de rede. O `avancar_tempo` não gera arquivos novos do IBGE.
 

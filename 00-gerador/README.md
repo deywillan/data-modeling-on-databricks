@@ -2,21 +2,98 @@
 
 Este pacote gera os dados sintéticos usados em todos os artigos da série. O Grupo ModelBricks é uma holding **fictícia**, com empresas de transporte de passageiros (ModelBricks Viação), de cargas (ModelBricks Cargas), uma concessionária de ônibus e caminhões (ModelBricks Veículos) e uma corretora de seguros (ModelBricks Seguros). Cada empresa tem seus próprios sistemas, e cada sistema entrega arquivos com formato, chaves e defeitos próprios, como acontece numa empresa de verdade.
 
-Você não precisa rodar nada desta pasta diretamente. O job `<NN>_setup` de cada artigo chama o gerador informando a sua **fatia**, e o job `avancar_tempo` gera os dias seguintes. Os dois são instalados pelo `databricks bundle deploy` na raiz do repositório; o README de cada artigo explica como rodá-los. Este documento explica **de onde vêm os dados** que você vai encontrar na landing.
+A série constrói **um único lakehouse**, com a arquitetura medalhão, em ordem: o artigo 00 prepara o projeto e constrói a **landing zone**, o artigo 01 monta a Bronze a partir dela, com todos os sistemas, os artigos 02 a 06 constroem a Silver a partir da Bronze, e os artigos 07 a 10 constroem a Gold a partir da Silver. Esta pasta é o conteúdo prático do artigo 00: os dados são gerados uma vez só, para a série inteira, pelo job `00_setup`, que constrói a landing zone. O job `avancar_tempo` gera os dias seguintes. Os dois são instalados pelo `databricks bundle deploy` na raiz do repositório. Este documento explica **como gerar os dados** e **de onde vêm** os arquivos que você vai encontrar na landing.
+
+## Como gerar os dados
+
+### 1. Pré-requisitos
+
+- Um workspace Databricks. O [Databricks Free Edition](https://www.databricks.com/learn/free-edition) basta: os jobs rodam em compute serverless e o Free Edition concede a permissão de criar catálogos, que o setup usa.
+- A [Databricks CLI](https://docs.databricks.com/aws/en/dev-tools/cli/install) instalada.
+- O [`uv`](https://docs.astral.sh/uv/) instalado. O `databricks bundle deploy` o usa para construir o gerador como wheel.
+
+### 2. Autenticar a CLI no workspace (uma vez só)
+
+Crie um perfil da CLI apontando para o seu workspace. O comando abre o navegador para você fazer login:
+
+```bash
+databricks auth login --host <url-do-seu-workspace> --profile <seu-perfil>
+```
+
+Nos passos seguintes, troque `<seu-perfil>` pelo nome que você escolheu aqui.
+
+### 3. Instalar os jobs no workspace
+
+Na raiz do repositório (a pasta que contém o `databricks.yml`, não a `00-gerador/`):
+
+```bash
+databricks bundle deploy -p <seu-perfil>
+```
+
+O deploy constrói o gerador, envia o wheel ao workspace e cria os jobs `00_setup` e `avancar_tempo`, além dos recursos de cada artigo. Rode-o de novo sempre que atualizar o repositório.
+
+### 4. Construir a landing zone (uma vez, antes do artigo 01)
+
+```bash
+databricks bundle run 00_setup -p <seu-perfil>
+```
+
+O job cria os três catálogos da série (`bronze_dev`, `silver_dev` e `gold_dev`), grava nas landings a carga inicial de todos os sistemas, grava o gabarito em `silver_dev.gabarito` e acerta o relógio simulado. Na escala padrão, leva cerca de 6 minutos e deixa cerca de 2 GB na landing. Ao final, a landing zone está pronta e nenhuma tabela da Bronze existe ainda: o [artigo 01](../01-bronze/README.md) parte daqui.
+
+Parâmetros opcionais:
+
+| Parâmetro | Padrão | Efeito |
+|---|---|---|
+| `escala` | `1` | multiplica os volumes; `0.1` serve para um teste rápido (os números dos artigos usam `1`) |
+| `reset` | `false` | com `true`, apaga os três catálogos e gera tudo de novo |
+
+```bash
+databricks bundle run 00_setup -p <seu-perfil> --params escala=0.1,reset=true
+```
+
+Rodar o setup de novo sem `reset` não altera nada: ele só informa a data do relógio. Atenção: o `reset=true` apaga os catálogos inteiros, inclusive as tabelas que os pipelines dos artigos já criaram. Depois dele, refaça a série a partir do artigo 01.
+
+### 5. Avançar o tempo
+
+Depois do setup, gere os lotes dos dias seguintes com o `avancar_tempo`, informando quantos dias avançar:
+
+```bash
+databricks bundle run avancar_tempo -p <seu-perfil> --params dias=1
+```
+
+O job gera os lotes de todos os sistemas e só grava arquivos novos na landing. Em seguida, rode os pipelines dos artigos que você já construiu, na ordem da série, para que cada camada receba os lotes novos.
+
+### 6. Conferir e limpar
+
+Para conferir o que o setup gerou (antes de rodar os pipelines), abra o Catalog Explorer no workspace ou rode, a partir de `00-gerador/`:
+
+```bash
+DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py dev
+```
+
+Para liberar espaço ao terminar a série, apague os três catálogos num editor SQL do workspace:
+
+```sql
+DROP CATALOG bronze_dev CASCADE;
+DROP CATALOG silver_dev CASCADE;
+DROP CATALOG gold_dev CASCADE;
+```
+
+No Free Edition, rode **um job ou pipeline por vez**: o workspace tem cota diária de compute e aceita poucas execuções simultâneas.
+
+Os comandos acima usam o target `dev`, o padrão, que gera catálogos com sufixo `_dev`. Com `-t prod` em todos os comandos (`deploy` e `run`), os catálogos ganham o sufixo `_prd`.
 
 ## Como os dados nascem
 
 ```
 roteiro.yaml ──► mundo verdadeiro ──► projeção de cada sistema ──► arquivos na landing
                  (pessoas, empresas,   (chave, formato, padrão       (Volumes do catálogo
-                  veículos, rotas...)   de entrega e defeitos)        Bronze do artigo)
+                  veículos, rotas...)   de entrega e defeitos)        bronze_<amb>)
 ```
 
 1. **Mundo verdadeiro.** Primeiro o gerador cria, com o [dbldatagen](https://github.com/databrickslabs/dbldatagen) e o Faker em `pt_BR`, as entidades "reais" do grupo: pessoas, empresas clientes, veículos, rotas, bases, lojas, colaboradores e municípios do IBGE. Também decide quem é cliente de quem: uma parte das pessoas é cliente de mais de uma empresa do grupo, e os ônibus e caminhões que a concessionária vende à própria holding passam a fazer parte da frota.
 2. **Projeção por sistema.** Cada sistema de origem enxerga só a parte do mundo que lhe interessa e a registra do seu jeito: com chave própria, grafia própria (o mesmo cliente pode aparecer em maiúsculas num sistema e com o CPF sem máscara em outro), o seu padrão de entrega e os seus defeitos.
-3. **Landing.** O resultado é gravado **só como arquivos** no Volume `landing` do schema de cada sistema, no catálogo Bronze do artigo. O gerador nunca cria tabelas nos catálogos Bronze, Silver e Gold (a única exceção é o `gabarito`, no Silver, nas fatias que o têm): quem os popula é o pipeline do artigo, lendo a landing como numa ingestão real.
-
-O mundo verdadeiro é sempre gerado inteiro, em qualquer artigo. Por isso, o mesmo cliente tem os mesmos dados em todos os artigos; muda só quais sistemas vão para a landing e, nos artigos sem gabarito, a ausência dos defeitos (veja o catálogo de defeitos, abaixo).
+3. **Landing.** O resultado é gravado **só como arquivos** no Volume `landing` do schema de cada sistema, no catálogo `bronze_<amb>`. O gerador nunca cria tabelas nos catálogos da série (a única exceção é o `gabarito`, no Silver): quem os popula são os pipelines dos artigos, a partir do artigo 01, que lê a landing como numa ingestão real.
 
 ## Sistemas de origem
 
@@ -36,51 +113,46 @@ A pasta [`docs/`](docs/README.md) documenta cada base: diagrama ER em Mermaid, d
 
 ### Organização dos catálogos
 
-Cada artigo tem três catálogos, um por camada, com o ambiente do target do bundle no fim do nome (`dev` gera `_dev`, `prod` gera `_prd`). O ambiente é a variável `ambiente` do `databricks.yml`.
+A série tem três catálogos, um por camada, com o ambiente do target do bundle no fim do nome (`dev` gera `_dev`, `prod` gera `_prd`). O ambiente é a variável `ambiente` do `databricks.yml`. Este é o estado logo depois do `00_setup`:
 
 ```
-a03_bronze_dev                                  Bronze do artigo 03 no target dev
-├── <sistema>                                   um schema por sistema da fatia (o IBGE também conta)
-│   └── landing (Volume)                        /Volumes/a03_bronze_dev/<sistema>/landing/
+bronze_dev                                      Bronze da série no target dev
+├── <sistema>                                   um schema por sistema (o IBGE também conta)
+│   └── landing (Volume)                        /Volumes/bronze_dev/<sistema>/landing/
 │       └── <entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_<NNNN>.<ext>
 └── _controle
-    └── relogio (Volume)                        /Volumes/a03_bronze_dev/_controle/relogio/<AAAA-MM-DD>.json
-a03_silver_dev                                  nasce vazio; só tem o schema gabarito nas fatias que o têm
-a03_gold_dev                                    nasce vazio
+    └── relogio (Volume)                        /Volumes/bronze_dev/_controle/relogio/<AAAA-MM-DD>.json
+silver_dev                                      só o schema gabarito; os artigos 02 a 06 acrescentam os seus
+gold_dev                                        nasce vazio; os artigos 07 a 10 o constroem
 ```
 
 - A data na pasta é a **data simulada** em que o lote chegou. Assim você vê o que chegou em cada dia.
 - Nenhum arquivo é sobrescrito: cada lote é um arquivo novo, e o Auto Loader trata cada um como novo.
 - O schema `_controle` guarda o relógio (abaixo) e não é dado de sistema. Os pipelines leem só os schemas dos sistemas.
-- O nome dos catálogos sai de uma função só, `catalogos.nome_catalogo(artigo, camada, ambiente)`, que valida os três.
+- O nome dos catálogos sai de uma função só, `catalogos.nome_catalogo(camada, ambiente)`, que valida os dois.
 
-## Fatias
+## Carga
 
-Cada artigo usa só os sistemas de que precisa. Essa escolha é a **fatia** do artigo, declarada na seção `fatias:` do [`roteiro.yaml`](src/modelbricks_gerador/roteiro.yaml):
+O `00_setup` grava todos os sistemas do grupo, declarados na seção `carga:` do [`roteiro.yaml`](src/modelbricks_gerador/roteiro.yaml). A ordem da lista é a ordem de geração: o *Rastro*, o maior, vem cedo, para que a gravação dele na landing corra enquanto os sistemas seguintes são gerados.
 
 ```yaml
-fatias:
-  01-bronze:
-    sistemas: [embarque, patio, passagemhub, rastro, ibge]
-    gabarito: false
-    janela_telemetria_dias: 90
+carga:
+  sistemas: [nucleo, rastro, embarque, passagemhub, rotacerta, patio, apolice, solticket, solfin, ibge]
 ```
 
-- `sistemas`: os sistemas que vão para a landing. Os demais não aparecem.
-- `gabarito`: se o catálogo Silver do artigo recebe o schema `gabarito` (veja abaixo). Os catálogos do artigo não saem do roteiro, e sim do número do artigo e do ambiente; cada artigo tem os seus, então rodar um não exige rodar outro.
-- `janela_telemetria_dias`: quantos dias de telemetria do *Rastro* entram na carga inicial. A telemetria é o maior volume do grupo, então a carga inicial traz só os últimos dias, seja qual for a escala.
+Cada artigo usa uma parte desses sistemas, mas todos leem a mesma Bronze: o README de cada artigo diz quais sistemas ele usa e o que rodar antes dele. A telemetria do *Rastro* é o maior volume do grupo, então a carga inicial traz só os últimos `parametros.telemetria_dias_carga_inicial` dias (90), seja qual for a escala.
 
 ## Relógio simulado
 
-A história do grupo começa em `datas.inicio` e a carga inicial vai até `datas.carga_inicial` (as duas no roteiro). O `<NN>_setup` grava todos os lotes desse período de uma vez e acerta o relógio do artigo na data da carga inicial.
+A história do grupo começa em `datas.inicio` e a carga inicial vai até `datas.carga_inicial` (as duas no roteiro). O `00_setup` grava todos os lotes desse período de uma vez e acerta o relógio da série na data da carga inicial.
 
-Depois disso, o job `avancar_tempo` gera os lotes dos dias seguintes ao relógio, só para os sistemas da fatia, e avança o relógio. O ciclo do leitor é **avançar o tempo → rodar o pipeline → observar o que mudou**.
+Depois disso, o job `avancar_tempo` gera os lotes dos dias seguintes ao relógio, de todos os sistemas, e avança o relógio. O ciclo do leitor é **avançar o tempo → rodar os pipelines, na ordem da série → observar o que mudou**.
 
 - O relógio fica no Volume `relogio` do schema `_controle` do catálogo Bronze: cada avanço grava um arquivo novo, e o relógio atual é o de maior data.
 - O avanço só cria arquivos novos; nenhum arquivo já entregue muda.
-- Os dados são **determinísticos**: a mesma escala, a mesma versão do roteiro e a mesma data produzem sempre os mesmos bytes. Avançar 3 dias de uma vez produz o mesmo que avançar 1 dia três vezes, e os seus números batem com os do artigo.
-- Rodar o `<NN>_setup` de novo, sem `reset`, não altera nada e só informa a data do relógio. Com `reset=true`, os três catálogos do artigo são apagados e recriados do zero.
-- Se o roteiro mudou de versão (ou a escala é outra) desde a carga inicial do catálogo, o `<NN>_setup` sem `reset` e o `avancar_tempo` param com um erro que manda recomeçar com `reset=true`: dados de gerações diferentes não se misturam na mesma landing.
+- Os dados são **determinísticos**: a mesma escala, a mesma versão do roteiro e a mesma data produzem sempre os mesmos bytes. Avançar 3 dias de uma vez produz o mesmo que avançar 1 dia três vezes, e os seus números batem com os dos artigos.
+- Rodar o `00_setup` de novo, sem `reset`, não altera nada e só informa a data do relógio. Com `reset=true`, os três catálogos são apagados e recriados do zero.
+- Se o roteiro mudou de versão (ou a escala é outra) desde a carga inicial, o `00_setup` sem `reset` e o `avancar_tempo` param com um erro que manda recomeçar com `reset=true`: dados de gerações diferentes não se misturam na mesma landing.
 - Se um job cair no meio (rede, cota, cancelamento), basta rodá-lo de novo: o relógio só avança no fim, um arquivo que já está na landing com os mesmos bytes conta como entregue (bytes diferentes continuam sendo erro) e o gabarito do intervalo não duplica.
 
 ## Roteiro
@@ -97,17 +169,17 @@ O [`roteiro.yaml`](src/modelbricks_gerador/roteiro.yaml) é a **única fonte de 
 | `sistemas` | entrega e formato de cada sistema |
 | `eventos` | acontecimentos com data marcada (abaixo) |
 | `defeitos` | o catálogo de defeitos (abaixo) |
-| `fatias` | os sistemas de cada artigo |
+| `carga` | os sistemas que o `00_setup` grava (todos) e a ordem de geração |
 
 Toda mudança no roteiro muda os dados gerados e, por isso, incrementa o campo `versao`, que fica registrado no relógio de cada catálogo.
 
 ### Escala
 
-O parâmetro `escala` do `<NN>_setup` multiplica linearmente os volumes do roteiro: `1` é o tamanho de referência, e valores como `0.1` servem para um teste rápido. A escala muda os dados, então compare os seus números com os do artigo usando a mesma escala.
+O parâmetro `escala` do `00_setup` multiplica linearmente os volumes do roteiro: `1` é o tamanho de referência, e valores como `0.1` servem para um teste rápido. A escala muda os dados, então compare os seus números com os dos artigos usando a mesma escala.
 
 Nas populações distribuídas entre empresas (rotas, bases, lojas e colaboradores), o roteiro garante ao menos uma instância por empresa (`mundo.minimo_por_empresa`), de modo que mesmo a escala `0.01` entrega todas as divisões com dados (a Viação, por exemplo, sempre tem rota e passagens).
 
-Na escala 1, no Free Edition, o `<NN>_setup` leva de poucos minutos (cerca de 4 minutos para o artigo 01 e para o 05) a cerca de 6 minutos (artigo 10, com todos os sistemas e cerca de 2 GB na landing). O job imprime, por sistema, os arquivos, o tamanho e o tempo de geração e de gravação. Para conferir o que o setup deixou no catálogo, rode, a partir de `00-gerador/`, `DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py <artigo> <ambiente>` (por exemplo, `01-bronze dev`): ele resume os catálogos, os schemas por sistema e a landing de cada sistema (`--arquivos` lista cada arquivo; `--relogio AAAA-MM-DD` confere a data do relógio simulado). Para exercitar o ciclo inteiro de um artigo num ambiente descartável (setup, setup repetido, `avancar_tempo`, `reset` e limpeza), há o `scripts/teste_fumaca.sh <seu-perfil> [artigo] [escala]`, que usa o ambiente `fumaca` (ou o de `AMBIENTE=...`) e nunca toca em `dev` nem em `prd`.
+Na escala 1, no Free Edition, o `00_setup` leva cerca de 6 minutos, com cerca de 11,8 mil arquivos e 2 GB na landing (o *Rastro* é quase metade). O job imprime, por sistema, os arquivos, o tamanho e o tempo de geração e de gravação. Para conferir o que o setup deixou no catálogo, rode, a partir de `00-gerador/`, `DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py <ambiente>` (por exemplo, `dev`): ele resume os catálogos, os schemas por sistema e a landing de cada sistema (`--arquivos` lista cada arquivo; `--relogio AAAA-MM-DD` confere a data do relógio simulado). Para exercitar o ciclo inteiro num ambiente descartável (setup, setup repetido, `avancar_tempo`, `reset` e limpeza), há o `scripts/teste_fumaca.sh <seu-perfil> [escala]`, que usa o ambiente `fumaca` (ou o de `AMBIENTE=...`) e nunca toca em `dev` nem em `prd`.
 
 ### Eventos com data
 
@@ -136,13 +208,13 @@ Dados de empresas reais têm defeitos, e os artigos precisam deles para mostrar 
 | `encoding_latin1` | arquivo inteiro em `latin1`, com acentos quebrados se lido como UTF-8 |
 | `valor_monetario_texto` | valor monetário como texto com vírgula (`"1.234,56"`) |
 
-A regra da série é que a Bronze **preserva** esses defeitos (no máximo os marca) e a correção acontece na Silver. Por isso eles estão nos arquivos desde a carga inicial.
+A regra da série é que a Bronze **preserva** esses defeitos (no máximo os marca) e a correção acontece na Silver.
 
-Os defeitos só são injetados nas fatias **com gabarito** (`gabarito: true` no roteiro), porque só nelas há a tabela `gabarito.defeitos` para conferir a correção. Nas fatias sem gabarito os arquivos saem limpos: o mesmo cliente aparece, na fatia sem gabarito, com o valor original, e, na fatia com gabarito, com o defeito registrado. A regra é a própria flag `gabarito` da fatia, aplicada em um só lugar (`Contexto.defeitos`).
+Todos os defeitos do catálogo estão nos arquivos desde a carga inicial, porque a Bronze é uma só para a série inteira: os artigos da Silver corrigem os defeitos que a Bronze do artigo 01 preservou. Cada defeito injetado fica registrado na tabela `gabarito.defeitos` (abaixo), com o valor original e o valor sujo.
 
 ## Gabarito
 
-Algumas fatias recebem o schema `gabarito` no catálogo Silver do artigo (`a03_silver_dev.gabarito`), com tabelas Delta que mostram a "verdade" por trás da landing:
+O `00_setup` grava o schema `gabarito` no catálogo Silver (`silver_dev.gabarito`), com tabelas Delta que mostram a "verdade" por trás da landing:
 
 - as entidades do mundo verdadeiro (`pessoas`, `empresas_pj`, `veiculos`, `participacoes`...);
 - `mapa_chaves`: a chave de cada entidade verdadeira em cada sistema, inclusive as chaves das cópias duplicadas de pessoas (o defeito `pessoa_duplicada_no_sistema` as identifica);
@@ -156,7 +228,7 @@ O pacote é Python 3.12 e usa o [`uv`](https://docs.astral.sh/uv/). O `databrick
 
 | Módulo | Papel |
 |---|---|
-| `api.py` | a API pública: `gerar_fatia` e `avancar_tempo` |
+| `api.py` | a API pública: `gerar_carga_inicial` e `avancar_tempo` |
 | `cli.py` | os pontos de entrada dos jobs |
 | `roteiro.py` e `roteiro.yaml` | o roteiro e a sua validação |
 | `mundo.py` | o mundo verdadeiro |
@@ -164,7 +236,7 @@ O pacote é Python 3.12 e usa o [`uv`](https://docs.astral.sh/uv/). O `databrick
 | `cdc.py`, `incremental.py`, `snapshot.py` | os padrões de entrega |
 | `defeitos.py` | o catálogo de defeitos |
 | `escritor.py` | a serialização dos arquivos (JSON, CSV, Parquet) |
-| `catalogos.py` | o nome dos catálogos (artigo + camada + ambiente), validado |
+| `catalogos.py` | o nome dos catálogos (camada + ambiente), validado |
 | `destino.py`, `destino_uc.py` | onde gravar: diretório local (testes) ou Unity Catalog (jobs) |
 | `relogio.py` | o relógio simulado |
 
@@ -173,7 +245,7 @@ Os testes chamam a API pública com um destino em diretório local e inspecionam
 - os testes não geram dados por conta própria: pedem uma das gerações compartilhadas de `tests/geracoes.py` (fixtures de sessão em `tests/conftest.py`), e cada geração roda no máximo uma vez por execução do pytest;
 - o resultado de cada geração fica em `00-gerador/.cache-testes/` (fora do Git), sob o hash do código do gerador e do roteiro. Enquanto o código não muda, uma nova execução não abre sessão no workspace. `--sem-cache` gera tudo de novo;
 - logo depois da coleta, as gerações que os testes escolhidos pedem rodam em paralelo (até três por vez, na mesma sessão), em vez de uma depois da outra;
-- a execução padrão deixa de fora os testes marcados como `lento` (gerações extras de determinismo e de geração em partes, fatias inteiras dos artigos e o Unity Catalog). Com o cache vazio, a execução padrão leva cerca de 9 minutos e a suíte completa, cerca de 28; com o cache cheio, a execução padrão leva menos de 30 segundos.
+- a execução padrão deixa de fora os testes marcados como `lento` (gerações extras de determinismo e de geração em partes, a carga completa e o Unity Catalog). Com o cache vazio, a execução padrão leva cerca de 9 minutos e a suíte completa, cerca de 28; com o cache cheio, a execução padrão leva menos de 30 segundos.
 
 ```bash
 cd 00-gerador
