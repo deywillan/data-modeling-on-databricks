@@ -1,6 +1,6 @@
-# Dependências locais do projeto, para quem prefere pip ao uv (Python 3.12). Servem para
+# Dependências locais do projeto (Python 3.12). Servem para
 # rodar os testes e os scripts do gerador na sua máquina:
-#   python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#   uv venv --python 3.12 && uv pip install -r requirements.txt
 # Os jobs do bundle não usam este arquivo: rodam no ambiente serverless do workspace, com o
 # gerador instalado como wheel pelo `databricks bundle deploy`.
 #
