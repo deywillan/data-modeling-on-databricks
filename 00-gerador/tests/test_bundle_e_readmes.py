@@ -128,3 +128,19 @@ def test_o_readme_raiz_indexa_os_artigos_e_orienta_um_por_vez():
     assert "DROP CATALOG bronze_dev CASCADE;" in texto
     assert not re.search(r"\ba\d{2}_(bronze|silver|gold)_", texto)
     assert not re.search(r"databricks-free-edition|dbw-|adb-\d|dapi[0-9a-f]{8}|https://[\w.-]+\.cloud\.databricks\.com", texto)
+
+
+def test_requirements_txt_bate_com_o_uv_lock():
+    import subprocess
+
+    exportado = subprocess.run(
+        ["uv", "export", "--frozen", "--no-hashes", "--no-emit-project", "--no-header"],
+        cwd=geracoes.RAIZ_GERADOR, capture_output=True, text=True, check=True,
+    ).stdout
+    texto = (RAIZ_REPOSITORIO / "requirements.txt").read_text(encoding="utf-8")
+
+    def pins(t: str) -> list[str]:
+        return [linha for linha in t.splitlines() if linha and not linha.lstrip().startswith("#") and not linha.startswith("-e ")]
+
+    assert pins(texto) == pins(exportado), "requirements.txt desatualizado em relação ao uv.lock"
+    assert texto.rstrip().endswith("-e ./00-gerador")

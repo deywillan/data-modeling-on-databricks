@@ -41,6 +41,12 @@ As pastas **não são autocontidas**: cada artigo lê o que os anteriores constr
 
 - O [`uv`](https://docs.astral.sh/uv/), que o deploy usa para construir o gerador de dados.
 
+Para rodar a série, basta isso: os jobs e os pipelines rodam no workspace. Para rodar na sua máquina os testes e os scripts do gerador, com Python 3.12, use o `uv sync` em `00-gerador/` ou, com pip, o [`requirements.txt`](requirements.txt):
+
+```bash
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+```
+
 ## Como rodar
 
 O repositório é um único bundle (Declarative Automation Bundles), com o `databricks.yml` nesta pasta. Todos os comandos rodam aqui, na raiz.
