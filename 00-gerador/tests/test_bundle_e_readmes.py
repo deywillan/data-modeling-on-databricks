@@ -116,3 +116,15 @@ def test_o_readme_do_gerador_explica_como_gerar_os_dados():
     assert "databricks bundle run avancar_tempo -p <seu-perfil> --params dias=1" in texto
     assert not re.search(r"\ba\d{2}_(bronze|silver|gold)_", texto)
     assert not re.search(r"\b(0[1-9]|10)_setup\b", texto)
+
+
+def test_o_readme_raiz_indexa_os_artigos_e_orienta_um_por_vez():
+    texto = (RAIZ_REPOSITORIO / "README.md").read_text(encoding="utf-8")
+
+    for artigo in ["00-gerador", *ARTIGOS]:
+        assert f"]({artigo}/README.md)" in texto, f"{artigo} sem link no README raiz"
+    assert "One active pipeline" not in texto and "um pipeline ativo por tipo" in texto
+    assert "databricks bundle run 00_setup -p <seu-perfil>" in texto
+    assert "DROP CATALOG bronze_dev CASCADE;" in texto
+    assert not re.search(r"\ba\d{2}_(bronze|silver|gold)_", texto)
+    assert not re.search(r"databricks-free-edition|dbw-|adb-\d|dapi[0-9a-f]{8}|https://[\w.-]+\.cloud\.databricks\.com", texto)
