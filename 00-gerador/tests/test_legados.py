@@ -1,8 +1,8 @@
 """Legados do Expresso Vale do Sol (*SolTicket* e *SolFin*) e a aquisição de 01/07/2025.
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e as
+Observado só pelo que `gerar_carga_inicial`/`avancar_tempo` gravam: os arquivos da landing e as
 tabelas do schema `gabarito`. O módulo usa a geração `legados` (ver `geracoes.py`): uma
-fatia dos legados junto com o *Embarque* (para a sobreposição de clientes), com gabarito,
+carga dos legados junto com o *Embarque* (para a sobreposição de clientes), com gabarito,
 gerada até a segunda-feira 05/01/2026, com taxas mais altas que as do Estudo de Caso nos
 defeitos raros do *SolTicket*, para medi-los com folga estatística. O teste lento compara
 com a `legados_em_partes`, gerada até a véspera da aquisição e avançada uma semana.
@@ -82,7 +82,7 @@ def _datas_esperadas(fim: date) -> list[date]:
 
 @pytest.fixture(scope="module")
 def gerado(legados):
-    """Fatia de Embarque + legados até a segunda-feira 05/01/2026 (geração `legados`)."""
+    """Carga de Embarque + legados até a segunda-feira 05/01/2026 (geração `legados`)."""
     assert legados.resultados[-1].data_relogio == ULTIMO_DIA
     destino = legados.final
     return destino, legados.roteiro, _arquivos(destino), _gabarito(destino)

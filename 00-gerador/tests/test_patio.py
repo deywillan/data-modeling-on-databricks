@@ -1,8 +1,8 @@
 """*Pátio* (DMS da ModelBricks Veículos): snapshots completos em CSV na landing.
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e as
+Observado só pelo que `gerar_carga_inicial`/`avancar_tempo` gravam: os arquivos da landing e as
 tabelas do schema `gabarito`. Para medir as taxas dos defeitos com folga estatística, o
-módulo usa a geração `patio` (ver `geracoes.py`): uma fatia só do *Pátio* (com gabarito)
+módulo usa a geração `patio` (ver `geracoes.py`): uma carga só do *Pátio* (com gabarito)
 na escala 0,2, até 03/01/2026, com a taxa de município fora do padrão mais alta que a do
 Estudo de Caso. O teste lento compara com a `patio_em_partes`, cujo `avancar_tempo`
 atravessa o fim do período de fotos diárias fechado em 31/12/2025.
@@ -62,7 +62,7 @@ def _mapa(gabarito, entidade: str, tabela: str) -> dict[int, str]:
 
 @pytest.fixture(scope="module")
 def gerado(patio):
-    """Fatia só do Pátio até 03/01/2026 (geração `patio`)."""
+    """Carga só do Pátio até 03/01/2026 (geração `patio`)."""
     assert patio.resultados[-1].data_relogio == ULTIMO_DIA
     destino = patio.final
     return destino, patio.roteiro, _arquivos(destino), _gabarito(destino)

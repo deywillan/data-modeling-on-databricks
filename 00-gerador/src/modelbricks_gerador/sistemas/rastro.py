@@ -19,8 +19,8 @@ Entrega: o dia é dividido em `arquivos_por_dia` janelas iguais e a frota em
 `rastro/eventos/<AAAA-MM-DD>/eventos_<AAAAMMDD>_<NNNN>.json`, com as linhas em ordem de
 chegada. A granularidade fica toda no roteiro (`parametros.rastro`).
 
-Janela: na carga inicial só entram os eventos dos últimos `janela_telemetria_dias` da fatia
-(ou `parametros.telemetria_dias_carga_inicial`) até a data da carga, independentemente da
+Janela: na carga inicial só entram os eventos dos últimos
+`parametros.telemetria_dias_carga_inicial` dias até a data da carga, independentemente da
 escala; no `avancar_tempo`, os dias novos. Cada evento nasce do seed do dia (seed base,
 sistema, data), então gerar um intervalo em partes ou de uma vez dá os mesmos eventos.
 
@@ -58,8 +58,7 @@ def projetar(contexto: Contexto, inicio: date, fim: date) -> Entrega:
         ultimo = min(fim, dia + timedelta(days=projecao.dias_por_coleta - 1))
         eventos = projecao.entregues(max(primeiro_evento, dia - timedelta(days=projecao.folga)), dia, ultimo)
         lotes += projecao.lotes(eventos)
-        if contexto.fatia.gabarito:
-            defeitos += projecao.defeitos_entregues(eventos)
+        defeitos += projecao.defeitos_entregues(eventos)
         dia = ultimo + timedelta(days=1)
     tabela = tabela_de_registros(contexto.spark, defeitos)
     return Entrega(lotes=lotes, defeitos=[tabela] if tabela is not None else [], mapa_chaves=projecao.mapa_chaves())
@@ -81,7 +80,7 @@ class _Projecao:
     def primeiro_evento(self, inicio: date, fim: date) -> date:
         """Dia do evento mais antigo que a entrega pode conter."""
         if self.contexto.carga_inicial:
-            janela = self.contexto.fatia.janela_telemetria_dias or self.roteiro.parametros.telemetria_dias_carga_inicial
+            janela = self.roteiro.parametros.telemetria_dias_carga_inicial
             return max(inicio, fim - timedelta(days=janela - 1))
         return max(self.roteiro.datas.inicio, inicio - timedelta(days=self.folga))
 

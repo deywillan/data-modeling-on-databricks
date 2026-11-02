@@ -9,7 +9,7 @@ Plataforma de rastreamento dos ônibus da ModelBricks Viação e dos caminhões 
 | Arquivos | até 24 por dia, um por hora de chegada com eventos: `rastro/eventos/<AAAA-MM-DD>/eventos_<AAAAMMDD>_<NNNN>.json`, com `NNNN` de `0001` a `0024` |
 | Entidade | `eventos` |
 | Volume (escala 1) | 400 veículos × 72 eventos por dia; cerca de 2,6 milhões de eventos nos 90 dias da carga inicial |
-| Fatias | 01, 09 e 10 |
+| Artigos | 01, 09 e 10 |
 
 ## Diagrama ER
 
@@ -91,7 +91,7 @@ Exemplo de linha (valores ilustrativos):
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|

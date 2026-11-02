@@ -19,7 +19,7 @@ from ..defeitos import Defeitos
 from ..escritor import Arquivo
 from ..expressoes import inteiro_e_fracao, uniforme
 from ..mundo import Mundo, gerar_mundo, linhas as linhas_na_escala
-from ..roteiro import Fatia, FormatoDeEntrega, Roteiro
+from ..roteiro import Carga, FormatoDeEntrega, Roteiro
 from ..sementes import semente
 
 if TYPE_CHECKING:
@@ -32,13 +32,13 @@ class Contexto:
 
     spark: "SparkSession"
     roteiro: Roteiro
-    fatia: Fatia
+    carga: Carga
     escala: float
-    carga_inicial: bool  # True na carga inicial do gerar_fatia; False no avancar_tempo
+    carga_inicial: bool  # True na carga inicial do gerar_carga_inicial; False no avancar_tempo
 
     def defeitos(self, sistema: str) -> Defeitos:
-        """Defeitos do sistema nesta fatia: os do roteiro se a fatia tem gabarito, nenhum se não tem."""
-        return Defeitos(self.roteiro, sistema, injetar=self.fatia.gabarito)
+        """Defeitos do sistema, com as taxas do roteiro."""
+        return Defeitos(self.roteiro, sistema)
 
     @cached_property
     def mundo(self) -> Mundo:

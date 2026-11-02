@@ -1,0 +1,54 @@
+# Dependências locais do projeto, para quem prefere pip ao uv (Python 3.12). Servem para
+# rodar os testes e os scripts do gerador na sua máquina:
+#   python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Os jobs do bundle não usam este arquivo: rodam no ambiente serverless do workspace, com o
+# gerador instalado como wheel pelo `databricks bundle deploy`.
+#
+# As versões vêm do 00-gerador/uv.lock; não edite à mão. Depois de mudar o pyproject.toml,
+# rode `uv lock` em 00-gerador/ e troque as linhas abaixo pela saída de
+#   uv export --frozen --no-hashes --no-emit-project --no-header
+# O teste test_requirements_txt_bate_com_o_uv_lock confere.
+annotated-types==0.8.0
+certifi==2026.7.22
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+charset-normalizer==3.5.2
+colorama==0.4.6 ; sys_platform == 'win32'
+cryptography==50.0.2
+databricks-connect==19.1
+databricks-sdk==0.149.0
+dbldatagen @ git+https://github.com/databrickslabs/dbldatagen@e9b6cde565f885d38be278552543dcb938bc413a
+faker==40.41.0
+google-auth==2.61.0
+googleapis-common-protos==1.75.5
+grpcio==1.84.0
+grpcio-status==1.84.0
+idna==3.20
+iniconfig==2.3.1
+jmespath==1.0.1
+numpy==2.3.4
+packaging==26.3
+pandas==2.3.3
+pluggy==1.6.0
+protobuf==6.33.6
+py4j==0.10.9.9
+pyarrow==21.0.0
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+pycparser==3.1 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+pydantic==2.14.0
+pydantic-core==2.50.0
+pygments==2.21.0
+pyparsing==3.2.5
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+pytz==2026.5
+pyyaml==6.0.3
+requests==2.34.2
+setuptools==84.0.0
+six==1.17.0
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+tzdata==2026.5
+urllib3==2.8.0
+zstandard==0.25.0
+-e ./00-gerador

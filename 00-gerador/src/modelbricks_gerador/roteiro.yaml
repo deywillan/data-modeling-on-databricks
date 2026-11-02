@@ -1,10 +1,10 @@
 # Roteiro do Grupo ModelBricks
 #
-# Única fonte de números do gerador: datas, volumes, taxas de defeitos, eventos e fatias.
+# Única fonte de números do gerador: datas, volumes, taxas de defeitos, eventos e a carga.
 # O código não tem constantes de volume ou taxa espalhadas. Alterar este arquivo altera os
 # dados gerados; por isso, toda mudança incrementa `versao`.
 
-versao: 14
+versao: 16
 
 # Seed base de todo o gerador. Os seeds de tabelas, sistemas e lotes derivam dele por hash
 # estável (seed base, sistema, data simulada).
@@ -53,8 +53,8 @@ parametros:
     remarcacao: 0.05                             # nova data de viagem (operação U)
     adiamento_remarcacao_dias: {minimo: 1, maximo: 15}
   # Telemetria da holding (Rastro): eventos de GPS e telemetria dos veículos da frota própria,
-  # entregues como muitos arquivos pequenos. Na carga inicial, só a janela de telemetria
-  # da fatia (ou `telemetria_dias_carga_inicial`), independentemente da escala. Eventos na
+  # entregues como muitos arquivos pequenos. Na carga inicial, só os últimos
+  # `telemetria_dias_carga_inicial` dias, independentemente da escala. Eventos na
   # janela, na escala 1: frota × eventos por dia × dias (400 × 72 × 90 ≈ 2,6 milhões).
   rastro:
     arquivos_por_dia: 24                         # granularidade: o dia em janelas iguais (24 = uma por hora)
@@ -197,7 +197,7 @@ mundo:
   tamanho_pools: 3000
   # Piso de instâncias por empresa nas populações distribuídas entre empresas (rotas, bases,
   # lojas e colaboradores): em escala pequena, nenhuma empresa fica sem rota, base, loja ou
-  # colaborador (sem isto, a 0,01 a Viação ficava sem rotas e a fatia 01, sem passagens).
+  # colaborador (sem isto, a 0,01 a Viação ficava sem rotas e, portanto, sem passagens).
   minimo_por_empresa: 1
   # UFs em que o grupo atua: rotas, bases, lojas, pessoas e empresas usam municípios delas.
   ufs_atuacao: [ES, MG, RJ, SP, BA, GO, DF, PR, SC, RS]
@@ -315,39 +315,9 @@ defeitos:
     descricao: Valor monetário como texto com vírgula ("1.234,56").
     taxas: {apolice: coluna}
 
-# Fatias: o que o 00_setup de cada artigo grava. O mundo verdadeiro é sempre gerado
-# inteiro; a fatia só decide quais sistemas vão para a landing e se há gabarito.
-fatias:
-  01-bronze:
-    sistemas: [embarque, patio, passagemhub, rastro, ibge]
-    gabarito: false
-    janela_telemetria_dias: 90
-  02-historizacao:
-    sistemas: [patio, embarque, nucleo, rotacerta]
-    gabarito: false
-  03-3fn:
-    sistemas: [nucleo, embarque, patio, apolice]
-    gabarito: true
-  04-ods:
-    sistemas: [embarque, passagemhub, rotacerta]
-    gabarito: false
-  05-raw-vault:
-    sistemas: [embarque, passagemhub, solticket, solfin]
-    gabarito: true
-  06-business-vault:
-    sistemas: [embarque, passagemhub, solticket, solfin]
-    gabarito: true
-  07-star-schema:
-    sistemas: [embarque, passagemhub]
-    gabarito: false
-  08-snowflake:
-    sistemas: [patio, ibge]
-    gabarito: false
-  09-obt:
-    sistemas: [rotacerta, rastro]
-    gabarito: false
-    janela_telemetria_dias: 90
-  10-data-marts:
-    sistemas: [nucleo, rastro, embarque, passagemhub, rotacerta, patio, apolice, solticket, solfin, ibge]
-    gabarito: true
-    janela_telemetria_dias: 90
+# Carga: o que o 00_setup grava. A série constrói um único lakehouse, então a Bronze recebe
+# todos os sistemas de uma vez, com o catálogo de defeitos inteiro, e o Silver recebe o
+# gabarito. A ordem da lista é a ordem de geração: o Rastro, o maior, vem cedo, para que a
+# gravação dele na landing corra enquanto os sistemas seguintes são gerados.
+carga:
+  sistemas: [nucleo, rastro, embarque, passagemhub, rotacerta, patio, apolice, solticket, solfin, ibge]

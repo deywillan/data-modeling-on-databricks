@@ -1,7 +1,7 @@
 """*Núcleo* (ERP corporativo do grupo): incremental por `updated_at` em Parquet, com *soft delete*.
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e, nas
-fatias com gabarito, as tabelas do schema `gabarito`.
+Observado só pelo que `gerar_carga_inicial`/`avancar_tempo` gravam: os arquivos da landing e as
+tabelas do schema `gabarito`.
 
 Para poupar a cota, o módulo usa a geração `principal` (ver `geracoes.py`), compartilhada
 com os outros sistemas. O roteiro oficial não dá taxa de defeito ao *Núcleo*; o roteiro de

@@ -1,6 +1,6 @@
 """Recuperação de falha parcial e conferência do relógio, sem Spark.
 
-`gerar_fatia`/`avancar_tempo` podem cair no meio (rede, cota, cancelamento do job). A nova
+`gerar_carga_inicial`/`avancar_tempo` podem cair no meio (rede, cota, cancelamento do job). A nova
 tentativa precisa terminar o serviço sem nunca sobrescrever a landing:
 
 - um arquivo que já existe com os mesmos bytes conta como gravado; com bytes diferentes
@@ -18,7 +18,7 @@ novos não combinariam com os antigos, e a API manda recomeçar com `reset`.
 from datetime import timedelta
 
 import pytest
-from falsos import ARTIGO, CARGA, SPARK_FALSO, SISTEMAS_FALSOS, roteiro_falso as _roteiro
+from falsos import CARGA, SPARK_FALSO, SISTEMAS_FALSOS, roteiro_falso as _roteiro
 
 from modelbricks_gerador import (
     ArquivoJaExiste,
@@ -26,21 +26,21 @@ from modelbricks_gerador import (
     RelogioIncompativel,
     avancar_tempo,
     carregar_roteiro,
-    gerar_fatia,
+    gerar_carga_inicial,
 )
 from modelbricks_gerador.escritor import Arquivo
 from modelbricks_gerador.relogio import Relogio, gravar_relogio, ler_relogio
 
 
 def _novo(raiz) -> DestinoLocal:
-    return DestinoLocal(raiz, ARTIGO, "t1")
+    return DestinoLocal(raiz, "t1")
 
 
 class DestinoQueCai(DestinoLocal):
     """Destino local que levanta `OSError` uma vez, no ponto combinado."""
 
     def __init__(self, raiz, *, apos_arquivos: int | None = None, no_relogio: bool = False):
-        super().__init__(raiz, ARTIGO, "t1")
+        super().__init__(raiz, "t1")
         self.apos_arquivos = apos_arquivos
         self.no_relogio = no_relogio
         self.gravados = 0
@@ -66,7 +66,7 @@ def _conteudo(destino: DestinoLocal) -> dict[str, bytes]:
 
 
 def _carga_inicial(destino: DestinoLocal, roteiro, **kwargs):
-    return gerar_fatia(ARTIGO, destino, ate=CARGA, spark=SPARK_FALSO, roteiro=roteiro, **kwargs)
+    return gerar_carga_inicial(destino, ate=CARGA, spark=SPARK_FALSO, roteiro=roteiro, **kwargs)
 
 
 def _referencia(tmp_path, roteiro, dias: int = 0) -> DestinoLocal:
@@ -74,7 +74,7 @@ def _referencia(tmp_path, roteiro, dias: int = 0) -> DestinoLocal:
     destino = _novo(tmp_path / "referencia")
     _carga_inicial(destino, roteiro)
     if dias:
-        avancar_tempo(ARTIGO, destino, dias, spark=SPARK_FALSO, roteiro=roteiro)
+        avancar_tempo(destino, dias, spark=SPARK_FALSO, roteiro=roteiro)
     return destino
 
 
@@ -107,7 +107,7 @@ def test_arquivo_existente_com_outros_bytes_continua_sendo_erro_e_nao_muda(tmp_p
 # -- recuperação -------------------------------------------------------------------------------
 
 
-def test_gerar_fatia_que_caiu_no_meio_termina_na_nova_tentativa_sem_sobrescrever(tmp_path, sistemas_falsos):
+def test_carga_inicial_que_caiu_no_meio_termina_na_nova_tentativa_sem_sobrescrever(tmp_path, sistemas_falsos):
     roteiro = _roteiro()
     caindo = DestinoQueCai(tmp_path / "ws", apos_arquivos=2)
 
@@ -133,11 +133,11 @@ def test_avancar_tempo_que_caiu_no_meio_termina_na_nova_tentativa(tmp_path, sist
     destino.apos_arquivos = destino.gravados + 3  # cai depois de 3 arquivos novos
 
     with pytest.raises(OSError, match="queda simulada"):
-        avancar_tempo(ARTIGO, destino, 3, spark=SPARK_FALSO, roteiro=roteiro)
+        avancar_tempo(destino, 3, spark=SPARK_FALSO, roteiro=roteiro)
 
     assert ler_relogio(destino).data_simulada == CARGA, "o relógio só avança no fim"
 
-    resultado = avancar_tempo(ARTIGO, _novo(destino.raiz), 3, spark=SPARK_FALSO, roteiro=roteiro)
+    resultado = avancar_tempo(_novo(destino.raiz), 3, spark=SPARK_FALSO, roteiro=roteiro)
 
     assert resultado.data_relogio == CARGA + timedelta(days=3)
     assert _conteudo(destino) == _conteudo(_referencia(tmp_path, roteiro, dias=3))
@@ -145,20 +145,20 @@ def test_avancar_tempo_que_caiu_no_meio_termina_na_nova_tentativa(tmp_path, sist
 
 def test_gabarito_do_intervalo_nao_duplica_quando_o_avanco_cai_depois_de_gravar_os_defeitos(tmp_path, sistemas_falsos):
     sistemas_falsos(defeitos=True)
-    roteiro = _roteiro(gabarito=True)
+    roteiro = _roteiro()
     destino = DestinoQueCai(tmp_path / "ws")
-    # A carga inicial com gabarito precisa do mundo (Spark); o estado "depois dela" é montado à mão.
-    destino.preparar(SISTEMAS_FALSOS, gabarito=True)
-    gravar_relogio(destino, Relogio(CARGA, ARTIGO, 1.0, roteiro.versao))
+    # O estado "depois da carga inicial" é montado à mão: o gabarito fica só com os defeitos do avanço.
+    destino.preparar(SISTEMAS_FALSOS)
+    gravar_relogio(destino, Relogio(CARGA, 1.0, roteiro.versao))
     destino.no_relogio = True  # cai ao gravar o relógio, depois de gravar landing e defeitos
 
     with pytest.raises(OSError, match="queda simulada"):
-        avancar_tempo(ARTIGO, destino, 4, spark=SPARK_FALSO, roteiro=roteiro)
+        avancar_tempo(destino, 4, spark=SPARK_FALSO, roteiro=roteiro)
 
     assert ler_relogio(destino).data_simulada == CARGA
     assert _defeitos(destino), "os defeitos do intervalo já tinham sido gravados"
 
-    avancar_tempo(ARTIGO, _novo(destino.raiz), 4, spark=SPARK_FALSO, roteiro=roteiro)
+    avancar_tempo(_novo(destino.raiz), 4, spark=SPARK_FALSO, roteiro=roteiro)
 
     depois = _defeitos(destino)
     assert len(depois) == len(set(depois)), "nenhum defeito aparece duas vezes"
@@ -169,13 +169,13 @@ def test_gabarito_do_intervalo_nao_duplica_quando_o_avanco_cai_depois_de_gravar_
 
 def test_avancos_seguidos_preservam_os_defeitos_dos_avancos_anteriores(tmp_path, sistemas_falsos):
     sistemas_falsos(defeitos=True)
-    roteiro = _roteiro(gabarito=True)
+    roteiro = _roteiro()
     destino = _novo(tmp_path / "ws")
-    destino.preparar(SISTEMAS_FALSOS, gabarito=True)
-    gravar_relogio(destino, Relogio(CARGA, ARTIGO, 1.0, roteiro.versao))
+    destino.preparar(SISTEMAS_FALSOS)
+    gravar_relogio(destino, Relogio(CARGA, 1.0, roteiro.versao))
 
-    avancar_tempo(ARTIGO, destino, 2, spark=SPARK_FALSO, roteiro=roteiro)
-    avancar_tempo(ARTIGO, destino, 2, spark=SPARK_FALSO, roteiro=roteiro)
+    avancar_tempo(destino, 2, spark=SPARK_FALSO, roteiro=roteiro)
+    avancar_tempo(destino, 2, spark=SPARK_FALSO, roteiro=roteiro)
 
     depois = _defeitos(destino)
     assert len(depois) == len(set(depois))
@@ -203,7 +203,7 @@ def _destino_com_relogio(tmp_path, *, versao_a_menos: int = 0, escala: float = 1
     roteiro = carregar_roteiro()
     destino = _novo(tmp_path / "ws")
     destino.preparar(SISTEMAS_FALSOS)
-    gravar_relogio(destino, Relogio(CARGA, ARTIGO, escala, roteiro.versao - versao_a_menos))
+    gravar_relogio(destino, Relogio(CARGA, escala, roteiro.versao - versao_a_menos))
     return destino
 
 
@@ -211,28 +211,28 @@ def test_avancar_tempo_com_outra_versao_do_roteiro_manda_recomecar(tmp_path):
     destino = _destino_com_relogio(tmp_path, versao_a_menos=1)
 
     with pytest.raises(RelogioIncompativel, match=r"versão.*roteiro.*reset"):
-        avancar_tempo(ARTIGO, destino, 1)  # falha antes de abrir a sessão
+        avancar_tempo(destino, 1)  # falha antes de abrir a sessão
 
     assert ler_relogio(destino).data_simulada == CARGA
 
 
-def test_gerar_fatia_sem_reset_com_outra_versao_do_roteiro_manda_recomecar(tmp_path):
+def test_carga_inicial_sem_reset_com_outra_versao_do_roteiro_manda_recomecar(tmp_path):
     destino = _destino_com_relogio(tmp_path, versao_a_menos=1)
 
     with pytest.raises(RelogioIncompativel, match=r"versão.*roteiro.*reset"):
-        gerar_fatia(ARTIGO, destino, escala=1.0)
+        gerar_carga_inicial(destino, escala=1.0)
 
 
-def test_gerar_fatia_sem_reset_com_outra_escala_manda_recomecar(tmp_path):
+def test_carga_inicial_sem_reset_com_outra_escala_manda_recomecar(tmp_path):
     destino = _destino_com_relogio(tmp_path, escala=1.0)
 
     with pytest.raises(RelogioIncompativel, match=r"escala.*reset"):
-        gerar_fatia(ARTIGO, destino, escala=0.5)
+        gerar_carga_inicial(destino, escala=0.5)
 
 
-def test_gerar_fatia_sem_reset_com_a_mesma_versao_e_escala_continua_idempotente(tmp_path):
+def test_carga_inicial_sem_reset_com_a_mesma_versao_e_escala_continua_idempotente(tmp_path):
     destino = _destino_com_relogio(tmp_path, escala=0.5)
 
-    resultado = gerar_fatia(ARTIGO, destino, escala=0.5)
+    resultado = gerar_carga_inicial(destino, escala=0.5)
 
     assert not resultado.gerou and resultado.data_relogio == CARGA

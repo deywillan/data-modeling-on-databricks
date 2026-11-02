@@ -1,10 +1,10 @@
-"""Mundo verdadeiro do Grupo ModelBricks, observado pelo gabarito gravado por `gerar_fatia`.
+"""Mundo verdadeiro do Grupo ModelBricks, observado pelo gabarito gravado por `gerar_carga_inicial`.
 
 Os volumes esperados vêm do Estudo de Caso (escala 1: 20 mil pessoas, 1,5 mil empresas PJ,
 3 mil veículos, dos quais 400 na frota própria, e 3 mil vendas); a escala multiplica
 linearmente.
 
-O mundo não depende da fatia nem dos ajustes do roteiro de teste (que só mexem nos sistemas),
+O mundo não depende dos sistemas da carga nem dos ajustes do roteiro de teste (que só mexem nos sistemas),
 então o módulo lê o gabarito das gerações compartilhadas: a `principal` (escala 0,05) e a
 `legados` (escala 0,1, o dobro). O teste lento gera o mundo de novo para comparar.
 """
@@ -38,10 +38,10 @@ def test_gabarito_tem_as_tabelas_do_mundo_e_nada_dele_vai_para_a_landing(mundo, 
 
     assert set(tabelas) == TABELAS | {"mapa_chaves", "defeitos"}
     entregues = destino.listar("")
-    # A landing tem só pastas dos sistemas da fatia e o controle do relógio. Entidades de
+    # A landing tem só pastas dos sistemas da carga e o controle do relógio. Entidades de
     # sistema podem ter o nome de uma tabela do mundo (ex.: `patio/veiculos/`) e o Núcleo
     # entrega Parquet, mas nada do gabarito fica fora dessas pastas.
-    raizes = set(carregar_roteiro(principal.roteiro).fatia(geracoes.PRINCIPAL.artigo).sistemas) | {"_controle"}
+    raizes = set(carregar_roteiro(principal.roteiro).carga.sistemas) | {"_controle"}
     assert {c.split("/")[0] for c in entregues} <= raizes
     assert not [c for c in entregues if "gabarito" in c]
 
@@ -72,7 +72,7 @@ def test_contagens_sao_proporcionais_a_escala(mundo, legados):
 def test_mesma_escala_e_roteiro_produzem_gabarito_identico(mundo, mundo_de_novo):
     _, primeira = mundo
     assert geracoes.MUNDO.escala == ESCALA
-    segunda = _gabarito(mundo_de_novo.final)  # outra fatia, gerada agora (sem cache)
+    segunda = _gabarito(mundo_de_novo.final)  # outra carga (só o IBGE), gerada agora (sem cache)
 
     assert {t: segunda[t] for t in TABELAS} == {t: primeira[t] for t in TABELAS}
 

@@ -9,7 +9,7 @@ Financeiro próprio do Expresso Vale do Sol, ainda não migrado para o [*Núcleo
 | Arquivos | um por entidade e data de foto: `solfin/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.csv` |
 | Entidades | `fornecedores`, `titulos_pagar` |
 | Volume (escala 1) | cerca de 45 fornecedores e 5 mil títulos na carga histórica (01/01/2024 a 30/06/2025), no mesmo ritmo depois |
-| Fatias | 05, 06 e 10 |
+| Artigos | 01, 05, 06 e 10 |
 
 ## Diagrama ER
 
@@ -73,7 +73,7 @@ As categorias do *SolFin* são diferentes das do *Núcleo* (`combustivel`, `peca
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|

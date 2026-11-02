@@ -13,10 +13,11 @@ import geracoes
 import pytest
 from databricks.sdk.errors import AlreadyExists, NotFound
 
-from modelbricks_gerador import ArquivoJaExiste, DestinoUC, gerar_fatia
+from modelbricks_gerador import ArquivoJaExiste, DestinoUC, gerar_carga_inicial
 from modelbricks_gerador.escritor import Arquivo
 
-# O falso não executa Spark, e o que se testa aqui é só onde o destino grava.
+# O falso não executa Spark (o mundo verdadeiro fica vazio, fixture `mundo_vazio`), e o que se
+# testa aqui é só onde o destino grava.
 _SO_IBGE = geracoes.roteiro_so_ibge()
 _CSV_IBGE = "ibge/municipios/2025-12-31/municipios_20251231_0001.csv"
 
@@ -29,6 +30,7 @@ class _UnityCatalogFalso:
         self.catalogos: dict[str, set[str]] = {}
         self.volumes: set[str] = set()
         self.arquivos: dict[str, bytes] = {}
+        self.tabelas: dict[str, list] = {}
         self.comandos: list[str] = []
         self.conf = SimpleNamespace(set=lambda *_: None)
         self.files = self
@@ -57,6 +59,10 @@ class _UnityCatalogFalso:
             raise AssertionError(f"SQL inesperado no falso: {comando}")
         return SimpleNamespace(collect=lambda: linhas)
 
+    # SparkSession.createDataFrame: só a tabela vazia de defeitos da carga inicial
+    def createDataFrame(self, linhas, _esquema):
+        return _TabelaFalsa(self, list(linhas))
+
     # WorkspaceClient.files
     def upload(self, caminho: str, conteudo: io.BytesIO, *, overwrite: bool):
         assert any(caminho.startswith(v + "/") for v in self.volumes), f"Volume inexistente: {caminho}"
@@ -75,37 +81,66 @@ class _UnityCatalogFalso:
         return SimpleNamespace(contents=io.BytesIO(self.arquivos[caminho]))
 
 
+class _TabelaFalsa:
+    """O mínimo de um DataFrame que `api._gravar_defeitos` e `DestinoUC.gravar_gabarito` usam."""
+
+    def __init__(self, uc: _UnityCatalogFalso, linhas: list):
+        self.uc, self.linhas = uc, linhas
+        self.write = self
+
+    def select(self, *_):
+        return self
+
+    def orderBy(self, *_):
+        return self
+
+    def mode(self, _modo):
+        return self
+
+    def saveAsTable(self, nome: str):
+        catalogo, schema, _ = nome.split(".")
+        assert schema in self.uc.catalogos[catalogo], f"schema inexistente: {nome}"
+        self.uc.tabelas[nome] = self.linhas
+
+
 @pytest.fixture
-def uc():
+def uc(mundo_vazio):
     return _UnityCatalogFalso()
 
 
-def _destino(uc, artigo="01-bronze", ambiente="t1"):
-    return DestinoUC(artigo, ambiente, spark=uc, workspace=uc)
+def _destino(uc, ambiente="t1"):
+    return DestinoUC(ambiente, spark=uc, workspace=uc)
 
 
-def test_a_carga_inicial_cria_tres_catalogos_com_um_schema_por_sistema(uc):
-    resultado = gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE)
+def test_a_carga_inicial_cria_os_tres_catalogos_da_serie_com_um_schema_por_sistema(uc):
+    resultado = gerar_carga_inicial(_destino(uc), spark=uc, roteiro=_SO_IBGE)
 
     assert resultado.gerou
-    assert set(uc.catalogos) == {"a01_bronze_t1", "a01_silver_t1", "a01_gold_t1"}
-    assert uc.catalogos["a01_bronze_t1"] == {"default", "information_schema", "ibge", "_controle"}
-    assert uc.catalogos["a01_silver_t1"] == {"default", "information_schema"}, "Silver vazio (sem gabarito)"
-    assert uc.catalogos["a01_gold_t1"] == {"default", "information_schema"}
-    assert uc.volumes == {"/Volumes/a01_bronze_t1/ibge/landing", "/Volumes/a01_bronze_t1/_controle/relogio"}
+    assert set(uc.catalogos) == {"bronze_t1", "silver_t1", "gold_t1"}
+    assert uc.catalogos["bronze_t1"] == {"default", "information_schema", "ibge", "_controle"}
+    assert uc.catalogos["silver_t1"] == {"default", "information_schema", "gabarito"}, "Silver só com o gabarito"
+    assert uc.catalogos["gold_t1"] == {"default", "information_schema"}
+    assert uc.volumes == {"/Volumes/bronze_t1/ibge/landing", "/Volumes/bronze_t1/_controle/relogio"}
 
 
 def test_cada_arquivo_cai_no_volume_do_proprio_sistema_e_o_relogio_em_controle(uc):
-    gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE)
+    gerar_carga_inicial(_destino(uc), spark=uc, roteiro=_SO_IBGE)
 
-    assert "/Volumes/a01_bronze_t1/ibge/landing/municipios/2025-12-31/municipios_20251231_0001.csv" in uc.arquivos
-    assert "/Volumes/a01_bronze_t1/_controle/relogio/2025-12-31.json" in uc.arquivos
+    assert "/Volumes/bronze_t1/ibge/landing/municipios/2025-12-31/municipios_20251231_0001.csv" in uc.arquivos
+    assert "/Volumes/bronze_t1/_controle/relogio/2025-12-31.json" in uc.arquivos
     assert len(uc.arquivos) == 2
+
+
+def test_o_gabarito_vai_para_um_schema_do_silver(uc):
+    gerar_carga_inicial(_destino(uc), spark=uc, roteiro=_SO_IBGE)
+
+    assert set(uc.tabelas) == {"silver_t1.gabarito.defeitos"}, "a tabela de defeitos nasce mesmo vazia"
+    assert "gabarito" not in uc.catalogos["bronze_t1"]
 
 
 def test_listar_e_ler_usam_os_caminhos_do_contrato(uc):
     destino = _destino(uc)
-    gerar_fatia("01-bronze", destino, spark=uc, roteiro=_SO_IBGE)
+    gerar_carga_inicial(destino, spark=uc, roteiro=_SO_IBGE)
 
     assert sorted(destino.listar("")) == sorted([_CSV_IBGE, "_controle/relogio/2025-12-31.json"])
     assert destino.listar("ibge/municipios") == [_CSV_IBGE]
@@ -116,7 +151,7 @@ def test_listar_e_ler_usam_os_caminhos_do_contrato(uc):
 
 def test_a_landing_nunca_sobrescreve_mas_aceita_os_mesmos_bytes(uc):
     destino = _destino(uc)
-    gerar_fatia("01-bronze", destino, spark=uc, roteiro=_SO_IBGE)
+    gerar_carga_inicial(destino, spark=uc, roteiro=_SO_IBGE)
     conteudo = destino.ler(_CSV_IBGE)
 
     destino.gravar_arquivos([Arquivo(_CSV_IBGE, conteudo)])
@@ -126,44 +161,27 @@ def test_a_landing_nunca_sobrescreve_mas_aceita_os_mesmos_bytes(uc):
     assert destino.ler(_CSV_IBGE) == conteudo
 
 
-def test_reexecutar_nao_cria_nada_e_o_reset_so_apaga_os_tres_catalogos_do_artigo(uc):
-    gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE)
-    uc.sql("CREATE CATALOG IF NOT EXISTS a03_bronze_t1")  # outro artigo
-    uc.sql("CREATE SCHEMA IF NOT EXISTS a01_silver_t1.sobra")
+def test_reexecutar_nao_cria_nada_e_o_reset_apaga_so_os_tres_catalogos_do_ambiente(uc):
+    gerar_carga_inicial(_destino(uc), spark=uc, roteiro=_SO_IBGE)
+    uc.sql("CREATE CATALOG IF NOT EXISTS bronze_prd")  # outro ambiente
+    uc.sql("CREATE SCHEMA IF NOT EXISTS silver_t1.ods")  # o schema que um artigo da Silver criou
 
-    segunda = gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE)
+    segunda = gerar_carga_inicial(_destino(uc), spark=uc, roteiro=_SO_IBGE)
     assert not segunda.gerou
-    assert "sobra" in uc.catalogos["a01_silver_t1"]
+    assert "ods" in uc.catalogos["silver_t1"], "rodar o setup de novo não apaga o que os artigos construíram"
 
-    terceira = gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE, reset=True)
+    terceira = gerar_carga_inicial(_destino(uc), spark=uc, roteiro=_SO_IBGE, reset=True)
 
     assert terceira.gerou
-    assert "sobra" not in uc.catalogos["a01_silver_t1"]
-    assert "a03_bronze_t1" in uc.catalogos
-    assert set(uc.catalogos) == {"a01_bronze_t1", "a01_silver_t1", "a01_gold_t1", "a03_bronze_t1"}
-
-
-def test_o_gabarito_vai_para_um_schema_do_silver(uc):
-    destino = _destino(uc)
-
-    destino.preparar(["embarque"], gabarito=True)
-
-    assert "gabarito" in uc.catalogos["a01_silver_t1"]
-    assert "gabarito" not in uc.catalogos["a01_bronze_t1"]
+    assert "ods" not in uc.catalogos["silver_t1"], "o reset recomeça a série do zero"
+    assert set(uc.catalogos) == {"bronze_t1", "silver_t1", "gold_t1", "bronze_prd"}
 
 
 def test_sem_permissao_para_criar_catalogo_o_erro_diz_qual(uc):
-    uc.proibidos = frozenset({"a01_silver_t1"})
+    uc.proibidos = frozenset({"silver_t1"})
 
-    with pytest.raises(PermissionError, match="a01_silver_t1"):
-        gerar_fatia("01-bronze", _destino(uc), spark=uc, roteiro=_SO_IBGE)
-
-
-def test_o_destino_de_outro_artigo_e_recusado_antes_do_ddl(uc):
-    with pytest.raises(ValueError, match="03-3fn"):
-        gerar_fatia("01-bronze", _destino(uc, artigo="03-3fn"), spark=uc, roteiro=_SO_IBGE)
-
-    assert uc.comandos == []
+    with pytest.raises(PermissionError, match="silver_t1"):
+        gerar_carga_inicial(_destino(uc), spark=uc, roteiro=_SO_IBGE)
 
 
 def test_ambiente_invalido_e_recusado_na_construcao(uc):

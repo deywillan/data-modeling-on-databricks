@@ -70,24 +70,17 @@ class Alvo:
 
 
 class Defeitos:
-    """Defeitos de um sistema, com as taxas do roteiro.
+    """Defeitos de um sistema, com as taxas do roteiro. A Bronze da série recebe o catálogo
+    inteiro, e cada defeito injetado fica registrado em `gabarito.defeitos`."""
 
-    `injetar=False` desliga todos: o sistema entrega os arquivos limpos. É o caso das fatias sem
-    gabarito (`Contexto.defeitos`), porque os defeitos só valem onde há `gabarito.defeitos` para
-    conferir a correção."""
-
-    def __init__(self, roteiro: Roteiro, sistema: str, injetar: bool = True):
+    def __init__(self, roteiro: Roteiro, sistema: str):
         self.roteiro = roteiro
         self.sistema = sistema
-        self.injetar = injetar
 
     # -- consulta ao roteiro ----------------------------------------------------------------
 
     def taxa(self, tipo: str) -> "float | str | None":
-        """Taxa do tipo para o sistema (fração, `arquivo`, `coluna`) ou `None` se não tem
-        (ou se a fatia não injeta defeitos)."""
-        if not self.injetar:
-            return None
+        """Taxa do tipo para o sistema (fração, `arquivo`, `coluna`) ou `None` se não tem."""
         return self.roteiro.defeitos[tipo].taxas.get(self.sistema)
 
     def folga_dias(self) -> int:

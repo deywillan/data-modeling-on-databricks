@@ -1,4 +1,4 @@
-"""Relógio simulado de um catálogo, guardado na pasta reservada `_controle/` da landing.
+"""Relógio simulado da série, guardado na pasta reservada `_controle/` da landing.
 
 Cada avanço grava um arquivo novo `_controle/relogio/<AAAA-MM-DD>.json`; o relógio atual é
 o de maior data. Assim a landing continua sem sobrescrita e guarda o histórico de avanços.
@@ -31,7 +31,6 @@ class Relogio:
     """Estado do relógio: data simulada atual e parâmetros com que o catálogo foi gerado."""
 
     data_simulada: date
-    artigo: str
     escala: float
     versao_roteiro: int
 
@@ -44,7 +43,6 @@ def ler_relogio(destino: Destino) -> Relogio | None:
     dados = json.loads(destino.ler(max(arquivos)))
     return Relogio(
         data_simulada=date.fromisoformat(dados["data_simulada"]),
-        artigo=dados["artigo"],
         escala=float(dados["escala"]),
         versao_roteiro=int(dados["versao_roteiro"]),
     )
@@ -65,10 +63,10 @@ def conferir_relogio(relogio: Relogio, versao_roteiro: int, escala: float | None
         raise RelogioIncompativel(
             f"O destino foi gerado com a versão {relogio.versao_roteiro} do roteiro, mas o roteiro atual é a "
             f"versão {versao_roteiro}. Os dados novos não combinariam com os que já estão na landing: "
-            "recomece do zero com gerar_fatia(..., reset=True)."
+            "recomece do zero com gerar_carga_inicial(..., reset=True)."
         )
     if escala is not None and not math.isclose(relogio.escala, escala, rel_tol=1e-9):
         raise RelogioIncompativel(
             f"O destino foi gerado na escala {relogio.escala:g}, mas a escala pedida é {escala:g}. Os dados "
-            "novos não combinariam com os que já estão na landing: recomece do zero com gerar_fatia(..., reset=True)."
+            "novos não combinariam com os que já estão na landing: recomece do zero com gerar_carga_inicial(..., reset=True)."
         )

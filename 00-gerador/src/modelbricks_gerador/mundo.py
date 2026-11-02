@@ -1,8 +1,8 @@
 """Mundo verdadeiro do Grupo ModelBricks: as entidades mestres com as chaves verdadeiras.
 
 Tudo o que os sistemas de origem entregam é uma projeção deste mundo. Ele é gerado inteiro
-em toda fatia (os sistemas só escolhem o que enxergam) e, nas fatias com gabarito, gravado
-no schema `gabarito`. Nunca vai para a landing.
+(os sistemas só escolhem o que enxergam) e gravado no schema `gabarito` do Silver. Nunca vai
+para a landing.
 
 Interface: `gerar_mundo(spark, roteiro, escala) -> Mundo`. O `Mundo` é um mapeamento
 nome → DataFrame (lazy) com as tabelas de `TABELAS`, e `Mundo.ordenado(nome)` devolve a

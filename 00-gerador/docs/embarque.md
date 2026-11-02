@@ -2,14 +2,13 @@
 
 Sistema de venda de passagens de ônibus da ModelBricks Viação, usado no guichê e no site. Entrega um **log de CDC**: cada linha é uma operação (`I`, `U` ou `D`) sobre um registro, na ordem em que aconteceu.
 
-| | |
-|---|---|
-| Schema na Bronze | `embarque` |
-| Formato | JSON lines (um objeto JSON por linha) |
-| Arquivos | um por entidade e dia simulado: `embarque/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.json` |
-| Entidades | `clientes`, `tarifas`, `passagens` |
+| Schema na Bronze  | `embarque`                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------- |
+| Formato           | JSON lines (um objeto JSON por linha)                                                                   |
+| Arquivos          | um por entidade e dia simulado: `embarque/<entidade>/<AAAA-MM-DD>/<entidade>_<AAAAMMDD>_0001.json`      |
+| Entidades         | `clientes`, `tarifas`, `passagens`                                                                      |
 | Volume (escala 1) | cerca de 360 mil passagens em 2024 e 2025 (60% das vendas da Viação; o restante sai pelo *PassagemHub*) |
-| Fatias | 01, 02, 03, 04, 05, 06, 07 e 10 |
+| Artigos            | 01, 02, 03, 04, 05, 06, 07 e 10 |
 
 ## Diagrama ER
 
@@ -137,7 +136,7 @@ stateDiagram-v2
 
 ## Ligação com o mundo verdadeiro
 
-Em `gabarito.mapa_chaves` (fatias com gabarito):
+Em `gabarito.mapa_chaves`:
 
 | Entidade | Coluna | Tabela verdadeira |
 |---|---|---|

@@ -4,12 +4,12 @@ O `gabarito` não é um sistema de origem. É a **resposta certa**: as entidades
 
 | | |
 |---|---|
-| Onde fica | schema `gabarito` do catálogo **Silver** do artigo: `aNN_silver_<amb>.gabarito` |
+| Onde fica | schema `gabarito` do catálogo **Silver** da série: `silver_<amb>.gabarito`, gravado pelo `00_setup` |
 | Formato | tabelas Delta gravadas pelo gerador (nunca arquivos na landing) |
 | Tabelas | as 10 do mundo verdadeiro, mais `mapa_chaves` e `defeitos` |
-| Fatias | só 03, 05, 06 e 10; nas demais, o schema não existe |
+| Usado nos artigos | 03, 05, 06 e 10, para conferir a solução |
 
-O mundo verdadeiro é gerado inteiro em **toda** fatia, mesmo nas que não gravam o gabarito: é dele que os sistemas projetam os seus dados. Por isso, o mesmo cliente tem os mesmos dados em todos os artigos.
+O mundo verdadeiro é gerado inteiro: é dele que os sistemas projetam os seus dados. Por isso, o mesmo cliente tem os mesmos dados em todos os sistemas que o conhecem, só com chave e grafia próprias.
 
 ## Diagrama ER do mundo verdadeiro
 

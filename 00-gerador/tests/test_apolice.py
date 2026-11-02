@@ -1,7 +1,7 @@
 """*Apólice+* (sistema de apólices da ModelBricks Seguros): incremental por `updated_at` em CSV,
 com valor monetário como texto ("1.234,56").
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e as
+Observado só pelo que `gerar_carga_inicial`/`avancar_tempo` gravam: os arquivos da landing e as
 tabelas do schema `gabarito`.
 
 Para poupar a cota, o módulo usa a geração `principal` (ver `geracoes.py`), compartilhada

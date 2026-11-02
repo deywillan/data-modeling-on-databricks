@@ -1,10 +1,9 @@
 """Roteiro: carregador validado do `roteiro.yaml`, a única fonte de números do gerador.
 
-Interface: `carregar_roteiro(caminho=None) -> Roteiro` e `Roteiro.fatia(artigo) -> Fatia`.
+Interface: `carregar_roteiro(caminho=None) -> Roteiro`; `Roteiro.carga` diz o que o setup grava.
 Roteiro inválido levanta `RoteiroInvalido` com a lista dos campos problemáticos.
 """
 
-import re
 from datetime import date
 from importlib import resources
 from pathlib import Path
@@ -14,7 +13,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 ROTEIRO_PADRAO = "roteiro.yaml"
-_ARTIGO = re.compile(r"^(\d{2})-([a-z0-9-]+)$")
 
 
 # Formato dos arquivos que um sistema entrega na landing.
@@ -338,13 +336,13 @@ class Defeito(_Modelo):
     atraso_dias: Intervalo | None = None  # defeitos de entrega: dias até a linha chegar
 
 
-class Fatia(_Modelo):
-    """O que o `00_setup` de um artigo grava: sistemas, gabarito e janela de telemetria."""
+class Carga(_Modelo):
+    """O que o `00_setup` grava: os sistemas que vão para a landing da Bronze, na ordem de geração.
 
-    artigo: str
+    A série constrói um único lakehouse, então o roteiro oficial lista todos os sistemas. Os
+    testes encurtam a lista para gerar só o que medem."""
+
     sistemas: list[str] = Field(min_length=1)
-    gabarito: bool
-    janela_telemetria_dias: int | None = Field(default=None, gt=0)
 
 
 class Roteiro(_Modelo):
@@ -359,18 +357,7 @@ class Roteiro(_Modelo):
     sistemas: dict[str, Sistema]
     eventos: dict[str, Evento]
     defeitos: dict[str, Defeito]
-    fatias: dict[str, Fatia]
-
-    @model_validator(mode="before")
-    @classmethod
-    def _artigo_nas_fatias(cls, dados):
-        if isinstance(dados, dict) and isinstance(dados.get("fatias"), dict):
-            dados = dict(dados)
-            dados["fatias"] = {
-                artigo: {"artigo": artigo, **fatia} if isinstance(fatia, dict) else fatia
-                for artigo, fatia in dados["fatias"].items()
-            }
-        return dados
+    carga: Carga
 
     @model_validator(mode="after")
     def _coerencia(self):
@@ -400,10 +387,9 @@ class Roteiro(_Modelo):
             atraso = defeito.atraso_dias
             if atraso is not None and not 1 <= atraso.minimo <= atraso.maximo:
                 erros.append(f"defeitos.{nome}.atraso_dias: é preciso 1 <= minimo <= maximo")
-        for artigo, fatia in self.fatias.items():
-            if not _ARTIGO.match(artigo):
-                erros.append(f"fatias.{artigo}: o artigo deve seguir o padrão 'NN-tema'")
-            erros += [f"fatias.{artigo}: sistema desconhecido '{s}'" for s in fatia.sistemas if s not in self.sistemas]
+        erros += [f"carga.sistemas: sistema desconhecido '{s}'" for s in self.carga.sistemas if s not in self.sistemas]
+        if len(set(self.carga.sistemas)) != len(self.carga.sistemas):
+            erros.append("carga.sistemas: sistema repetido")
         if erros:
             raise ValueError("; ".join(erros))
         return self
@@ -639,13 +625,6 @@ class Roteiro(_Modelo):
             if any(v < 0 for v in pesos.values()) or sum(pesos.values()) <= 0:
                 erros.append(f"parametros.{nome}: pesos devem ser não negativos com soma positiva")
         return erros
-
-    def fatia(self, artigo: str) -> Fatia:
-        """Fatia declarada para o artigo; `KeyError` com as opções válidas se não existir."""
-        try:
-            return self.fatias[artigo]
-        except KeyError:
-            raise KeyError(f"Artigo '{artigo}' não tem fatia no roteiro. Opções: {', '.join(self.fatias)}") from None
 
 
 def carregar_roteiro(caminho: str | Path | None = None) -> Roteiro:

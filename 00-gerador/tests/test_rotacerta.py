@@ -1,7 +1,7 @@
 """*RotaCerta* (TMS da ModelBricks Cargas): lotes CDC de fretes em JSON na landing.
 
-Observado só pelo que `gerar_fatia`/`avancar_tempo` gravam: os arquivos da landing e, nas
-fatias com gabarito, as tabelas do schema `gabarito`.
+Observado só pelo que `gerar_carga_inicial`/`avancar_tempo` gravam: os arquivos da landing e as
+tabelas do schema `gabarito`.
 
 Para poupar a cota, o módulo usa a geração `principal` (ver `geracoes.py`), compartilhada
 com os outros sistemas. As taxas de defeito do *RotaCerta* são as do roteiro oficial

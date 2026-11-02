@@ -1,23 +1,23 @@
-"""Confere, por SQL e pela API de arquivos, o que o setup de um artigo deixou no Unity Catalog.
+"""Confere, por SQL e pela API de arquivos, o que o `00_setup` deixou no Unity Catalog.
 
 Uso (da pasta 00-gerador/, com o perfil da sua CLI):
 
-    DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py 01-bronze dev
-    DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py 01-bronze dev --arquivos
-    DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py 01-bronze dev --relogio 2026-01-01
+    DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py dev
+    DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py dev --arquivos
+    DATABRICKS_CONFIG_PROFILE=<seu-perfil> uv run python scripts/conferir_catalogo.py dev --relogio 2026-01-01
 
-O segundo argumento é o ambiente dos catálogos (`dev`, `prd` ou o de um teste). Imprime os três
-catálogos do artigo (`aNN_bronze_<amb>`, `aNN_silver_<amb>`, `aNN_gold_<amb>`), os schemas do
+O argumento é o ambiente dos catálogos (`dev`, `prd` ou o de um teste). Imprime os três
+catálogos da série (`bronze_<amb>`, `silver_<amb>`, `gold_<amb>`), os schemas do
 Bronze com seus Volumes, as tabelas por schema e, da landing de cada sistema, o número de
 arquivos e o tamanho. Com `--arquivos`, lista também cada arquivo (tamanho e data de
 modificação). A listagem percorre as pastas em paralelo (`--threads`, 16 por padrão):
 sequencial, 3,7 mil arquivos levavam cerca de 20 minutos.
 
-Termina com erro se: o Bronze não tiver exatamente um schema por sistema da fatia mais o
-`_controle`; algum catálogo tiver tabelas fora do `gabarito` do Silver; o schema `gabarito`
-existir sem que a fatia o declare (ou faltar quando ela o declara); ou, com `--relogio
-AAAA-MM-DD`, o relógio simulado não estiver nessa data (o relógio atual é o arquivo de maior
-data no Volume `relogio` do schema `_controle`).
+Confere o estado logo depois do setup, antes de rodar os pipelines dos artigos. Termina com
+erro se: o Bronze não tiver exatamente um schema por sistema da carga mais o `_controle`;
+algum catálogo tiver tabelas fora do `gabarito` do Silver; faltar o schema `gabarito`; ou, com
+`--relogio AAAA-MM-DD`, o relógio simulado não estiver nessa data (o relógio atual é o arquivo
+de maior data no Volume `relogio` do schema `_controle`).
 """
 
 import argparse
@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from databricks.connect import DatabricksSession
 from databricks.sdk import WorkspaceClient
 
-from modelbricks_gerador import carregar_roteiro, catalogos_do_artigo
+from modelbricks_gerador import carregar_roteiro, catalogos_da_serie
 
 SCHEMAS_DO_UNITY_CATALOG = {"default", "information_schema"}
 
@@ -59,9 +59,9 @@ def schemas_de(spark, catalogo: str) -> set[str]:
     return {linha[0] for linha in linhas} - SCHEMAS_DO_UNITY_CATALOG
 
 
-def main(artigo: str, ambiente: str, arquivos: bool, threads: int, relogio: str | None = None) -> int:
-    fatia = carregar_roteiro().fatia(artigo)
-    catalogos = catalogos_do_artigo(artigo, ambiente)
+def main(ambiente: str, arquivos: bool, threads: int, relogio: str | None = None) -> int:
+    carga = carregar_roteiro().carga
+    catalogos = catalogos_da_serie(ambiente)
     spark = DatabricksSession.builder.serverless().getOrCreate()
     erros = 0
 
@@ -72,7 +72,7 @@ def main(artigo: str, ambiente: str, arquivos: bool, threads: int, relogio: str 
 
     bronze, silver, gold = catalogos["bronze"], catalogos["silver"], catalogos["gold"]
     schemas = schemas_de(spark, bronze)
-    esperados = set(fatia.sistemas) | {"_controle"}
+    esperados = set(carga.sistemas) | {"_controle"}
     print(f"Schemas em {bronze}:", ", ".join(sorted(schemas)))
     if schemas != esperados:
         print(f"  ERRO: esperado {', '.join(sorted(esperados))}")
@@ -87,8 +87,8 @@ def main(artigo: str, ambiente: str, arquivos: bool, threads: int, relogio: str 
 
     schemas_silver = schemas_de(spark, silver)
     print(f"Schemas em {silver}:", ", ".join(sorted(schemas_silver)) or "(nenhum)")
-    if schemas_silver != ({"gabarito"} if fatia.gabarito else set()):
-        print(f"  ERRO: gabarito {'esperado' if fatia.gabarito else 'não esperado'} nesta fatia")
+    if schemas_silver != {"gabarito"}:
+        print("  ERRO: esperado só o schema gabarito")
         erros += 1
     for schema in sorted(schemas_silver):
         tabelas = [r["tableName"] for r in spark.sql(f"SHOW TABLES IN {silver}.{schema}").collect()]
@@ -136,10 +136,9 @@ def main(artigo: str, ambiente: str, arquivos: bool, threads: int, relogio: str 
 
 if __name__ == "__main__":
     analisador = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    analisador.add_argument("artigo", help="artigo da fatia, ex.: 01-bronze")
     analisador.add_argument("ambiente", help="ambiente dos catálogos, ex.: dev")
     analisador.add_argument("--arquivos", action="store_true", help="lista também cada arquivo")
     analisador.add_argument("--threads", type=int, default=16, help="pastas listadas em paralelo")
     analisador.add_argument("--relogio", metavar="AAAA-MM-DD", help="data em que o relógio simulado deve estar")
     argumentos = analisador.parse_args()
-    sys.exit(main(argumentos.artigo, argumentos.ambiente, argumentos.arquivos, argumentos.threads, argumentos.relogio))
+    sys.exit(main(argumentos.ambiente, argumentos.arquivos, argumentos.threads, argumentos.relogio))

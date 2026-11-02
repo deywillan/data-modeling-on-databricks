@@ -1,12 +1,13 @@
-"""`gerar_fatia` gravando no Unity Catalog (`DestinoUC`), conferido por SQL no workspace.
+"""`gerar_carga_inicial` gravando no Unity Catalog (`DestinoUC`), conferido por SQL no workspace.
 
 Cada execução da sessão usa um ambiente de teste próprio (`t` + 8 hexadecimais aleatórios, o que
-dá catálogos como `a01_bronze_t3f9a2c1b`), para que duas execuções simultâneas (ou uma que
+dá catálogos como `bronze_t3f9a2c1b`), para que duas execuções simultâneas (ou uma que
 morreu no meio) nunca disputem os mesmos catálogos. Eles só são removidos no fim, com
 `try/finally`; nada é apagado antes, porque o nome é novo. A carga inicial roda uma vez, numa
 fixture do módulo, e cada teste parte dela: uma falha num teste não derruba os outros em cascata.
-O que se testa é onde o destino grava, não a geração dos sistemas: a fatia 01-bronze é reduzida
-ao IBGE, o que poupa a geração e o envio de milhares de arquivos ao Volume. Marcado como `lento`
+O que se testa é onde o destino grava, não a geração dos sistemas: a carga é reduzida ao IBGE,
+o que poupa a geração e o envio de milhares de arquivos ao Volume (o gabarito traz o mundo
+verdadeiro na escala 0,01). Marcado como `lento`
 porque cria e apaga catálogos no workspace.
 """
 
@@ -15,7 +16,7 @@ import uuid
 import geracoes
 import pytest
 
-from modelbricks_gerador import ArquivoJaExiste, DestinoUC, catalogos_do_artigo, gerar_fatia
+from modelbricks_gerador import ArquivoJaExiste, DestinoUC, catalogos_da_serie, gerar_carga_inicial
 from modelbricks_gerador.catalogos import validar_ambiente
 from modelbricks_gerador.escritor import Arquivo
 
@@ -33,7 +34,7 @@ def ambiente_de_teste() -> str:
 @pytest.fixture(scope="module")
 def catalogos(spark, ambiente_de_teste):
     """Os três catálogos de teste desta execução, apagados só no fim."""
-    nomes = catalogos_do_artigo("01-bronze", ambiente_de_teste)
+    nomes = catalogos_da_serie(ambiente_de_teste)
     try:
         yield nomes
     finally:
@@ -43,13 +44,13 @@ def catalogos(spark, ambiente_de_teste):
 
 @pytest.fixture(scope="module")
 def destino_uc(spark, ambiente_de_teste, catalogos):
-    return DestinoUC("01-bronze", ambiente_de_teste, spark=spark)
+    return DestinoUC(ambiente_de_teste, spark=spark)
 
 
 @pytest.fixture(scope="module")
 def carga_inicial(spark, destino_uc):
-    """A carga inicial da fatia, feita uma vez; os testes partem do que ela deixou."""
-    return gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
+    """A carga inicial, feita uma vez; os testes partem do que ela deixou."""
+    return gerar_carga_inicial(destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
 
 
 def _schemas(spark, catalogo) -> set[str]:
@@ -83,7 +84,9 @@ def test_carga_inicial_cria_tres_catalogos_schema_por_sistema_ibge_e_relogio(spa
     for schema, volume in (("ibge", "landing"), ("_controle", "relogio")):
         volumes = [linha["volume_name"] for linha in spark.sql(f"SHOW VOLUMES IN {catalogos['bronze']}.{schema}").collect()]
         assert volumes == [volume]
-    assert _schemas(spark, catalogos["silver"]) == set(), "Silver vazio (a fatia 01 não tem gabarito)"
+    assert _schemas(spark, catalogos["silver"]) == {"gabarito"}, "no Silver, só o gabarito"
+    # O IBGE não tem chave de entidade do mundo verdadeiro, então a carga só com ele não grava `mapa_chaves`.
+    assert {"pessoas", "municipios", "defeitos"} <= set(_tabelas(spark, catalogos["silver"], "gabarito"))
     assert _schemas(spark, catalogos["gold"]) == set()
 
     caminhos = [arquivo[0] for arquivo in _arquivos_landing(destino_uc)]
@@ -102,7 +105,7 @@ def test_carga_inicial_cria_tres_catalogos_schema_por_sistema_ibge_e_relogio(spa
 def test_reexecutar_sem_reset_nao_altera_nada(spark, destino_uc, carga_inicial):
     antes = _arquivos_landing(destino_uc)
 
-    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
+    resultado = gerar_carga_inicial(destino_uc, spark=spark, escala=0.01, roteiro=SO_IBGE)
 
     assert not resultado.gerou
     assert "31/12/2025" in resultado.mensagem
@@ -139,7 +142,7 @@ def test_listar_devolve_os_caminhos_do_contrato(destino_uc, carga_inicial):
 def test_apagar_do_gabarito_remove_so_as_linhas_a_partir_da_data(spark, destino_uc, carga_inicial):
     from datetime import date
 
-    destino_uc.preparar(["ibge"], gabarito=True)
+    destino_uc.preparar(["ibge"])
     linhas = [(date(2026, 1, 1), "antes"), (date(2026, 1, 2), "no_dia"), (date(2026, 1, 3), "depois"), (None, "sem_data")]
     destino_uc.gravar_gabarito("defeitos_de_teste", spark.createDataFrame(linhas, "data_entrega date, rotulo string"))
 
@@ -155,7 +158,7 @@ def test_reset_recria_os_tres_catalogos_do_zero(spark, catalogos, destino_uc, ca
     spark.sql(f"CREATE TABLE {catalogos['bronze']}.ibge.sobra_de_execucao_anterior (id INT)")
     spark.sql(f"CREATE TABLE {catalogos['gold']}.default.sobra_de_execucao_anterior (id INT)")
 
-    resultado = gerar_fatia("01-bronze", destino_uc, spark=spark, escala=0.01, reset=True, roteiro=SO_IBGE)
+    resultado = gerar_carga_inicial(destino_uc, spark=spark, escala=0.01, reset=True, roteiro=SO_IBGE)
 
     assert resultado.gerou
     assert _tabelas(spark, catalogos["bronze"], "ibge") == []

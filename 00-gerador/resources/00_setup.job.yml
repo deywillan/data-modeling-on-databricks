@@ -1,0 +1,38 @@
+# Job 00_setup: prepara o lakehouse da série. Cria os catálogos bronze_<amb>, silver_<amb> e
+# gold_<amb> (o ambiente vem do target do bundle: dev → _dev, prod → _prd), com um schema por
+# sistema de origem e o Volume landing no Bronze, grava a carga inicial de todos os sistemas nas
+# landings e o gabarito no Silver. Roda uma vez, antes do artigo 01; os artigos seguintes
+# constroem sobre a Bronze que o artigo 01 monta a partir dessas landings.
+#
+#   databricks bundle run 00_setup -p <seu-perfil>
+#   databricks bundle run 00_setup -p <seu-perfil> --params escala=0.1,reset=true
+#
+# Atenção: reset=true apaga os três catálogos, inclusive as tabelas que os pipelines dos artigos
+# criaram. Depois dele, a série é refeita a partir do artigo 01.
+
+resources:
+  jobs:
+    00_setup:
+      name: 00_setup
+      parameters:
+        - name: escala
+          default: "1"
+        - name: reset
+          default: "false"
+      tasks:
+        - task_key: gerar_carga_inicial
+          environment_key: gerador
+          python_wheel_task:
+            package_name: modelbricks_gerador
+            entry_point: gerar_carga_inicial
+            parameters:
+              - "--escala={{job.parameters.escala}}"
+              - "--reset={{job.parameters.reset}}"
+              - "--ambiente=${var.ambiente}"
+      # Sem cluster declarado: o job roda em compute serverless (o único do Free Edition).
+      environments:
+        - environment_key: gerador
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../dist/*.whl

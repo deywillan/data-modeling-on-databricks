@@ -1,4 +1,4 @@
-"""Catálogo de defeitos observado pelo que `gerar_fatia`/`avancar_tempo` gravam.
+"""Catálogo de defeitos observado pelo que `gerar_carga_inicial`/`avancar_tempo` gravam.
 
 O roteiro oficial só dá ao *Embarque* a taxa de CDC duplicado (como no Estudo de Caso).
 Para exercitar os demais defeitos de linha pela mesma projeção, este módulo usa a geração
@@ -34,7 +34,7 @@ def _operacoes(destino: DestinoLocal) -> list[dict]:
 
 
 def _gabarito(destino: DestinoLocal) -> dict[str, list[dict]]:
-    """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do Embarque (a fatia
+    """Tabelas do gabarito; `mapa_chaves` e `defeitos` só com as linhas do Embarque (a carga
     tem outros sistemas)."""
     return geracoes.gabarito(destino, "embarque")
 
