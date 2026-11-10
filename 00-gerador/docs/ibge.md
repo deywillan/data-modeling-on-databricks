@@ -6,12 +6,20 @@ Dado público de referência, não é um sistema do grupo. É a lista oficial de
 |---|---|
 | Schema na Bronze | `ibge` |
 | Formato | CSV com cabeçalho, separador `,`, UTF-8 |
-| Arquivo | um só, na carga inicial: `ibge/municipios/2025-12-31/municipios_20251231_0001.csv` |
+| Arquivos | uma lista completa por ano, todo dia 2 de janeiro: `ibge/municipios/2024-01-02/municipios_20240102_0001.csv` e `2025-01-02/...` na carga inicial, `2026-01-02/...` no `avancar_tempo` |
 | Entidade | `municipios` |
-| Volume | 5.571 municípios, 27 UFs e 5 regiões, independentemente da escala |
+| Volume | 5.570 municípios nas listas de 2024 e 2025 e 5.571 a partir da de 2026, com 27 UFs e 5 regiões, independentemente da escala |
 | Artigos | 01, 08 e 10 |
 
-O arquivo vem versionado no pacote do gerador (`src/modelbricks_gerador/dados/ibge_municipios.csv`), extraído da [API de Localidades do IBGE](https://servicodados.ibge.gov.br/api/docs/localidades) pelo script `scripts/extrair_ibge.py`. O setup não depende de rede. O `avancar_tempo` não gera arquivos novos do IBGE.
+O arquivo vem versionado no pacote do gerador (`src/modelbricks_gerador/dados/ibge_municipios.csv`), extraído da [API de Localidades do IBGE](https://servicodados.ibge.gov.br/api/docs/localidades) pelo script `scripts/extrair_ibge.py`. O setup não depende de rede.
+
+## Entregas
+
+O grupo baixa a lista de municípios do IBGE uma vez por ano, no dia 2 de janeiro, e a landing recebe a lista **inteira** a cada vez, não só o que mudou. A carga inicial traz as listas de 2024 e 2025; o `avancar_tempo` traz a de 2026 quando o relógio passa por 02/01/2026 (e uma por ano depois disso).
+
+As listas não são idênticas. Boa Esperança do Norte (MT, código `5101837`) foi instalado em 1º de janeiro de 2025 e só aparece a partir da lista de 2026, então as de 2024 e 2025 têm 5.570 municípios e a de 2026 tem 5.571. Nenhum sistema do grupo atua em MT (`mundo.ufs_atuacao` no roteiro), então a diferença não deixa endereço sem município. O gabarito (`silver_dev.gabarito.municipios`) tem a lista completa, com os 5.571.
+
+É essa sequência que o artigo 01 usa para mostrar o espelho: a tabela `bronze_dev.ibge.municipios` é substituída pelo conteúdo do arquivo mais recente a cada carga, e as listas anteriores continuam na landing.
 
 ## Diagrama ER
 

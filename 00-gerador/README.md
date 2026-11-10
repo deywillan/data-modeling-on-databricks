@@ -107,7 +107,7 @@ roteiro.yaml ──► mundo verdadeiro ──► projeção de cada sistema ─
 | *RotaCerta* | TMS da ModelBricks Cargas | CDC de fretes, como o *Embarque* | JSON lines | `rotacerta/clientes`, `caminhoes`, `fretes` |
 | *Apólice+* | ModelBricks Seguros | incremental por `updated_at` | CSV | `apolice/segurados`, `apolices` |
 | *SolTicket*, *SolFin* | sistemas legados do Expresso Vale do Sol, empresa adquirida pelo grupo | carga histórica única na data da aquisição e, depois, snapshots periódicos | CSV com `;` em `latin1` | `solticket/`, `solfin/` |
-| IBGE | dado público de referência | arquivo único na carga inicial | CSV | `ibge/municipios` |
+| IBGE | dado público de referência | lista completa, uma vez por ano (2 de janeiro) | CSV | `ibge/municipios` |
 
 A pasta [`docs/`](docs/README.md) documenta cada base: diagrama ER em Mermaid, dicionário de dados, ciclo de vida dos registros e defeitos. O `gabarito` também está lá. A docstring de cada módulo em [`src/modelbricks_gerador/sistemas/`](src/modelbricks_gerador/sistemas/) traz as regras de geração.
 

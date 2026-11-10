@@ -17,7 +17,7 @@ O [README do gerador](../README.md) explica de onde os dados vêm, como os catá
 | [*Apólice+*](apolice.md) | ModelBricks Seguros | incremental por `updated_at` | CSV | `segurados`, `apolices` | 01, 03, 10 |
 | [*SolTicket*](solticket.md) | Expresso Vale do Sol (legado) | carga histórica e snapshots semanais | CSV `;` em `latin1` | `clientes`, `linhas`, `passagens` | 01, 05, 06, 10 |
 | [*SolFin*](solfin.md) | Expresso Vale do Sol (legado) | carga histórica e snapshots semanais | CSV `;` em `latin1` | `fornecedores`, `titulos_pagar` | 01, 05, 06, 10 |
-| [IBGE](ibge.md) | dado público de referência | arquivo único na carga inicial | CSV | `municipios` | 01, 08, 10 |
+| [IBGE](ibge.md) | dado público de referência | lista completa, uma vez por ano (2 de janeiro) | CSV | `municipios` | 01, 08, 10 |
 | [`gabarito`](gabarito.md) | mundo verdadeiro (não é sistema de origem) | tabelas Delta no catálogo Silver | Delta | 10 tabelas do mundo, `mapa_chaves` e `defeitos` | 03, 05, 06, 10 |
 
 A coluna **Artigos** diz em quais artigos a base é usada. Todas chegam à Bronze no artigo 01, porque a série constrói um único lakehouse: o `00_setup` grava todos os sistemas, conforme a seção `carga:` do [`roteiro.yaml`](../src/modelbricks_gerador/roteiro.yaml), e os artigos seguintes leem a mesma Bronze. No `gabarito`, a coluna diz quais artigos o usam para conferir a solução.

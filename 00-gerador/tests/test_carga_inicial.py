@@ -155,14 +155,16 @@ def test_a_bronze_recebe_o_catalogo_de_defeitos_inteiro_registrado_no_gabarito(c
     assert registrados <= esperados
 
 
-def test_grava_municipios_do_ibge_na_landing_pela_data_simulada(carga):
-    pasta = carga["a"].pasta_sistema("ibge") / "municipios" / CARGA_INICIAL.isoformat()
-    csvs = list(pasta.glob("*.csv"))
-    assert len(csvs) == 1
-    linhas = csvs[0].read_text(encoding="utf-8").splitlines()
-    assert linhas[0].startswith("cod_municipio,nome_municipio,cod_uf,sigla_uf")
-    assert len(linhas) - 1 == 5571
-    assert any(linha.startswith("3550308,São Paulo,35,SP,São Paulo,3,SE,Sudeste") for linha in linhas)
+def test_grava_uma_lista_de_municipios_do_ibge_por_ano_na_landing(carga):
+    raiz = carga["a"].pasta_sistema("ibge") / "municipios"
+    assert sorted(p.name for p in raiz.iterdir()) == ["2024-01-02", "2025-01-02"]
+    for pasta in raiz.iterdir():
+        (csv,) = pasta.glob("*.csv")
+        linhas = csv.read_text(encoding="utf-8").splitlines()
+        assert linhas[0].startswith("cod_municipio,nome_municipio,cod_uf,sigla_uf")
+        assert len(linhas) - 1 == 5570, "Boa Esperança do Norte só entra na lista de 2026"
+        assert not any(linha.startswith("5101837,") for linha in linhas)
+        assert any(linha.startswith("3550308,São Paulo,35,SP,São Paulo,3,SE,Sudeste") for linha in linhas)
 
 
 def test_relogio_comeca_na_data_da_carga_inicial(carga):
