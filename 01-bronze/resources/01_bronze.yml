@@ -1,0 +1,60 @@
+# Recursos do artigo 01 (Bronze): o pipeline que ingere os sistemas do grupo e o job do espelho do IBGE.
+#
+# Ordem de execução (depois do 00_setup):
+#
+#   databricks bundle run 01_bronze -p <seu-perfil>
+#   databricks bundle run 01_ibge -p <seu-perfil>
+#
+# Depois de cada avancar_tempo, rode os dois de novo: o pipeline lê só os arquivos novos, e o job
+# substitui o espelho do IBGE quando chega uma lista nova.
+
+resources:
+  pipelines:
+    # Pipeline 01_bronze: uma streaming table append-only por entidade de cada sistema, lendo a
+    # landing com Auto Loader (STREAM read_files). Um notebook SQL por sistema, em 01-bronze/src/.
+    01_bronze:
+      name: 01_bronze
+      catalog: bronze_${var.ambiente}
+      # Todas as tabelas têm o schema no nome (embarque.clientes, patio.vendas...), então o schema
+      # padrão do pipeline não recebe nenhuma tabela. O _controle é o único schema do catálogo que
+      # não pertence a um sistema.
+      schema: _controle
+      serverless: true
+      configuration:
+        catalogo_bronze: bronze_${var.ambiente}
+      libraries:
+        - notebook:
+            path: ../src/embarque.sql
+        - notebook:
+            path: ../src/patio.sql
+        - notebook:
+            path: ../src/passagemhub.sql
+        - notebook:
+            path: ../src/rastro.sql
+        - notebook:
+            path: ../src/rotacerta.sql
+        - notebook:
+            path: ../src/nucleo.sql
+        - notebook:
+            path: ../src/apolice.sql
+        - notebook:
+            path: ../src/solticket.sql
+        - notebook:
+            path: ../src/solfin.sql
+
+  jobs:
+    # Job 01_ibge: espelha na Bronze a lista de municípios do IBGE (bronze_<amb>.ibge.municipios).
+    #
+    # É a única tabela da Bronze fora do pipeline: o pipeline só cria streaming tables e
+    # materialized views, e o espelho é uma substituição completa (CREATE OR REPLACE TABLE) com uma
+    # guarda de volume antes da troca. Veja 01-bronze/src/ibge_municipios.sql.
+    01_ibge:
+      name: 01_ibge
+      tasks:
+        - task_key: espelhar_municipios
+          notebook_task:
+            notebook_path: ../src/ibge_municipios.sql
+            base_parameters:
+              landing: /Volumes/bronze_${var.ambiente}/ibge/landing/municipios/
+              tabela: bronze_${var.ambiente}.ibge.municipios
+      # Sem cluster declarado: o notebook roda em compute serverless (o único do Free Edition).

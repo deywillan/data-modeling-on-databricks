@@ -91,15 +91,16 @@ def test_carga_inicial_cria_tres_catalogos_schema_por_sistema_ibge_e_relogio(spa
 
     caminhos = [arquivo[0] for arquivo in _arquivos_landing(destino_uc)]
     bronze = catalogos["bronze"]
-    assert f"/Volumes/{bronze}/ibge/landing/municipios/2025-12-31/municipios_20251231_0001.csv" in caminhos
+    for dia in ("2024-01-02", "2025-01-02"):
+        assert f"/Volumes/{bronze}/ibge/landing/municipios/{dia}/municipios_{dia.replace('-', '')}_0001.csv" in caminhos
     assert f"/Volumes/{bronze}/_controle/relogio/2025-12-31.json" in caminhos
 
     municipios = spark.sql(
         f"SELECT count(*) AS n, count_if(nome_municipio = 'São Paulo') AS sp FROM read_files("
         f"'/Volumes/{bronze}/ibge/landing/municipios/', format => 'csv', header => true)"
     ).first()
-    assert municipios["n"] == 5571
-    assert municipios["sp"] == 1
+    assert municipios["n"] == 2 * 5570, "duas listas anuais, sem Boa Esperança do Norte"
+    assert municipios["sp"] == 2
 
 
 def test_reexecutar_sem_reset_nao_altera_nada(spark, destino_uc, carga_inicial):
@@ -113,7 +114,7 @@ def test_reexecutar_sem_reset_nao_altera_nada(spark, destino_uc, carga_inicial):
 
 
 def test_landing_nunca_sobrescreve(destino_uc, carga_inicial):
-    caminho = "ibge/municipios/2025-12-31/municipios_20251231_0001.csv"
+    caminho = "ibge/municipios/2025-01-02/municipios_20250102_0001.csv"
 
     with pytest.raises(ArquivoJaExiste):
         destino_uc.gravar_arquivos([Arquivo(caminho, b"outro conteudo")])
@@ -122,7 +123,7 @@ def test_landing_nunca_sobrescreve(destino_uc, carga_inicial):
 
 
 def test_arquivo_ja_gravado_com_os_mesmos_bytes_conta_como_gravado(destino_uc, carga_inicial):
-    caminho = "ibge/municipios/2025-12-31/municipios_20251231_0001.csv"
+    caminho = "ibge/municipios/2025-01-02/municipios_20250102_0001.csv"
     conteudo = destino_uc.ler(caminho)
 
     destino_uc.gravar_arquivos([Arquivo(caminho, conteudo)])  # nova tentativa de uma chamada que caiu
@@ -133,7 +134,8 @@ def test_arquivo_ja_gravado_com_os_mesmos_bytes_conta_como_gravado(destino_uc, c
 def test_listar_devolve_os_caminhos_do_contrato(destino_uc, carga_inicial):
     assert destino_uc.listar("") == [
         "_controle/relogio/2025-12-31.json",
-        "ibge/municipios/2025-12-31/municipios_20251231_0001.csv",
+        "ibge/municipios/2024-01-02/municipios_20240102_0001.csv",
+        "ibge/municipios/2025-01-02/municipios_20250102_0001.csv",
     ]
     assert destino_uc.listar("_controle/relogio") == ["_controle/relogio/2025-12-31.json"]
     assert destino_uc.listar("rastro") == []

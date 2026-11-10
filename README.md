@@ -41,11 +41,16 @@ As pastas **não são autocontidas**: cada artigo lê o que os anteriores constr
 
 - O [`uv`](https://docs.astral.sh/uv/), que o deploy usa para construir o gerador de dados.
 
-Para rodar a série, basta isso: os jobs e os pipelines rodam no workspace. Para rodar na sua máquina os testes e os scripts do gerador, com Python 3.12, use o `uv sync` em `00-gerador/` ou, com pip, o [`requirements.txt`](requirements.txt):
+Clone o repositório e crie o ambiente virtual com as dependências do [`requirements.txt`](requirements.txt). O `uv` baixa o Python 3.12, se ele ainda não estiver na sua máquina:
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+git clone https://github.com/deywillan/data-modeling-on-databricks.git
+cd data-modeling-on-databricks
+uv venv --python 3.12
+uv pip install -r requirements.txt
 ```
+
+O ambiente serve para rodar na sua máquina os scripts de conferência e os testes do gerador. Os jobs e os pipelines não dependem dele, porque rodam no workspace.
 
 ## Como rodar
 
