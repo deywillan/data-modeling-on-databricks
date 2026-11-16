@@ -1,0 +1,35 @@
+# Recursos do artigo 02 (Historização): o pipeline que aplica os padrões de historização sobre a
+# Bronze construída no artigo 01.
+#
+# Ordem de execução (depois do 00_setup e do 01_bronze):
+#
+#   databricks bundle run 02_historizacao -p <seu-perfil>
+#
+# Depois de cada avancar_tempo, rode 01_bronze e, em seguida, este pipeline: cada camada só enxerga o
+# que a anterior já processou.
+
+resources:
+  pipelines:
+    # Pipeline 02_historizacao: SCD0, SCD1 e SCD2 em silver_<amb>.historizacao, e os dois snapshots
+    # de Kimball (periodic e accumulating), que já são fatos prontos para consumo, em
+    # gold_<amb>.historizacao. Um notebook SQL por exemplo do artigo, em 02-historizacao/src/.
+    02_historizacao:
+      name: 02_historizacao
+      catalog: silver_${var.ambiente}
+      # Schema padrão do pipeline: as tabelas da Silver são criadas aqui sem qualificar o nome. As da
+      # Gold levam o nome completo (${catalogo_gold}.historizacao.<tabela>). O pipeline cria os dois
+      # schemas se eles ainda não existirem.
+      schema: historizacao
+      serverless: true
+      configuration:
+        catalogo_bronze: bronze_${var.ambiente}
+        catalogo_gold: gold_${var.ambiente}
+      libraries:
+        - notebook:
+            path: ../src/tarifas_embarque.sql
+        - notebook:
+            path: ../src/clientes_patio.sql
+        - notebook:
+            path: ../src/fornecedores_nucleo.sql
+        - notebook:
+            path: ../src/snapshots_gold.sql
