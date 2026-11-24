@@ -152,7 +152,7 @@ As colunas `empresa`, `empresa_frota`, `empresa_vendedora` e `empresa_compradora
 | `colaboradores` | `id_colaborador` | 1.500 | Vínculo de uma pessoa com uma empresa do grupo: cargo e admissão. Cada pessoa tem no máximo um vínculo. |
 | `participacoes` | `tipo_entidade`, `id_entidade`, `empresa`, `papel` | — | Quem é cliente de quem (`papel = cliente`) e de quem é cada veículo da frota (`papel = frota`), com a data de início (`desde`). |
 
-**Participações.** Cada pessoa é cliente de uma empresa principal (Viação 70%, Vale do Sol 15%, Seguros 10%, Veículos 5%), e 15% das pessoas são clientes também de uma segunda empresa. Cada empresa PJ é cliente da Cargas (70%), da Veículos (20%) ou da Seguros (10%), e 20% delas de uma segunda empresa. É essa sobreposição que faz o mesmo cliente aparecer em vários sistemas.
+**Participações.** Cada pessoa é cliente de uma empresa principal (Viação 70%, Vale do Sol 15%, Seguros 10%, Veículos 5%), e 15% das pessoas são clientes também de uma segunda empresa (5% do total, um subconjunto desses 15%, são clientes de uma terceira: o caso de quem viaja, compra um veículo e faz seguro). Cada empresa PJ é cliente da Cargas (70%), da Veículos (20%) ou da Seguros (10%), e 20% delas de uma segunda empresa. É essa sobreposição que faz o mesmo cliente aparecer em vários sistemas.
 
 ## `mapa_chaves`
 

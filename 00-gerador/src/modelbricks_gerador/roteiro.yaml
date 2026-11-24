@@ -39,6 +39,9 @@ volumes:
 # Parâmetros de comportamento do mundo verdadeiro e dos sistemas.
 parametros:
   pessoas_em_mais_de_uma_empresa: 0.15
+  # Subconjunto dos 15% acima: pessoas que são clientes de três empresas do grupo (o caso "viaja, compra
+  # caminhão e faz seguro"). Precisa ser menor ou igual a `pessoas_em_mais_de_uma_empresa`.
+  pessoas_em_tres_empresas: 0.05
   eventos_por_frete: {minimo: 5, maximo: 8}
   telemetria_dias_carga_inicial: 90
   # Bilhetagem da Viação (Embarque): vendas e ciclo de vida das passagens.

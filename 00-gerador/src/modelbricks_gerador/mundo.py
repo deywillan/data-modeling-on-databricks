@@ -261,8 +261,12 @@ class _Gerador:
             dsl.pattern("cep", "{digit:5}-{digit:3}"),
         ]
 
-    def participacao(self, pesos: dict[str, float], taxa_multi: float) -> list:
-        """Colunas auxiliares: empresa principal, segunda empresa (quando houver) e datas."""
+    def participacao(self, pesos: dict[str, float], taxa_multi: float, taxa_tripla: float = 0.0) -> list:
+        """Colunas auxiliares: empresa principal, segunda e terceira empresas (quando houver) e datas.
+
+        `taxa_tripla` é a fração do total que também é cliente de uma terceira empresa; ela é um
+        subconjunto de `taxa_multi` (quem tem terceira empresa tem segunda).
+        """
         from dbldatagen.core.spec import dsl
         from dbldatagen.core.spec.schema import WeightedValues
 
@@ -280,6 +284,14 @@ class _Gerador:
             ),
             dsl.timestamp("_desde_principal", start=inicio, end=fim),
             dsl.timestamp("_desde_segunda", start=inicio, end=fim),
+            dsl.integer("_k_terceira", min=0, max=999999),
+            dsl.expression(
+                "_terceira_empresa",
+                f"CASE WHEN _u_multi < {taxa_tripla} "
+                f"THEN element_at(array_remove({outras}, _segunda_empresa), "
+                f"cast(pmod(_k_terceira, {max(len(empresas) - 2, 1)}) + 1 AS int)) END",
+            ),
+            dsl.timestamp("_desde_terceira", start=inicio, end=fim),
         ]
 
     def pessoas(self):
@@ -307,7 +319,9 @@ class _Gerador:
             dsl.integer("_n_email", min=1, max=999),
             *self.contato_e_endereco(email),
             *self.participacao(
-                self.m.participacao.pessoas, self.roteiro.parametros.pessoas_em_mais_de_uma_empresa
+                self.m.participacao.pessoas,
+                self.roteiro.parametros.pessoas_em_mais_de_uma_empresa,
+                self.roteiro.parametros.pessoas_em_tres_empresas,
             ),
         ]
         return self.tabela("pessoas", self.n["pessoas"], colunas)
@@ -476,7 +490,11 @@ class _Gerador:
     def participacoes_clientes(self, pessoas: "DataFrame", empresas: "DataFrame") -> "DataFrame":
         partes = []
         for df, tipo, chave in ((pessoas, "pessoa", "id_pessoa"), (empresas, "empresa_pj", "id_empresa")):
-            for empresa, desde in (("_empresa_principal", "_desde_principal"), ("_segunda_empresa", "_desde_segunda")):
+            for empresa, desde in (
+                ("_empresa_principal", "_desde_principal"),
+                ("_segunda_empresa", "_desde_segunda"),
+                ("_terceira_empresa", "_desde_terceira"),
+            ):
                 partes.append(
                     df.where(f"{empresa} IS NOT NULL").selectExpr(
                         f"'{tipo}' AS tipo_entidade", f"{chave} AS id_entidade", f"{empresa} AS empresa",

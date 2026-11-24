@@ -95,6 +95,17 @@ def test_cerca_de_15_por_cento_das_pessoas_sao_clientes_de_mais_de_uma_empresa(m
     assert set().union(*empresas.values()) == {"mb_viacao", "mb_veiculos", "mb_seguros", "evs"}
 
 
+def test_cerca_de_5_por_cento_das_pessoas_sao_clientes_de_tres_empresas(mundo):
+    _, tabelas = mundo
+    empresas = _empresas_por_pessoa(tabelas)
+
+    tres = sum(len(e) == 3 for e in empresas.values()) / len(tabelas["pessoas"])
+    assert 0.03 <= tres <= 0.07
+    assert max(len(e) for e in empresas.values()) == 3, "ninguém tem mais de três empresas"
+    # O caso de negócio do artigo 03: viaja (Viação), compra (Veículos) e faz seguro (Seguros).
+    assert any({"mb_viacao", "mb_veiculos", "mb_seguros"} <= e for e in empresas.values())
+
+
 def test_frota_propria_foi_vendida_pela_concessionaria_as_empresas_do_grupo(mundo):
     _, tabelas = mundo
     veiculos = {v["id_veiculo"]: v for v in tabelas["veiculos"]}
