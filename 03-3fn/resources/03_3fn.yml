@@ -1,0 +1,51 @@
+# Recursos do artigo 03 (3FN): o job que cria as funções de documento e o pipeline que integra os sistemas do grupo
+# no modelo em 3FN.
+#
+# Ordem de execução (depois do 00_setup, do 01_bronze e do 01_ibge):
+#
+#   databricks bundle run 03_funcoes -p <seu-perfil>
+#   databricks bundle run 03_3fn -p <seu-perfil>
+#
+# O 03_funcoes roda uma vez (e de novo só se as funções mudarem). Depois de cada avancar_tempo, rode 01_bronze e,
+# em seguida, 03_3fn: cada camada só enxerga o que a anterior já processou. O pipeline 02_historizacao não é
+# pré-requisito: a 3FN lê a Bronze, e não as tabelas do artigo 02.
+
+resources:
+  jobs:
+    # Job 03_funcoes: cria as funções SQL do Unity Catalog em silver_<amb>.3fn (normaliza_documento,
+    # digito_verificador_cpf, cpf_valido, normaliza_placa e converte_valor_brl). Ficam fora do pipeline porque o SQL
+    # do pipeline só chama funções, não as cria. O ODS (artigo 04) as reaproveita.
+    03_funcoes:
+      name: 03_funcoes
+      tasks:
+        - task_key: criar_funcoes
+          notebook_task:
+            notebook_path: ../src/funcoes.sql
+            base_parameters:
+              catalogo: silver_${var.ambiente}
+      # Sem cluster declarado: o notebook roda em compute serverless (o único do Free Edition).
+
+  pipelines:
+    # Pipeline 03_3fn: a Silver em 3FN, em silver_<amb>.3fn, com a regra de system of record (regra.sql). Um notebook SQL por grupo de entidades, em 03-3fn/src/.
+    # O schema 3fn começa com dígito: funciona sem crase nas consultas, mas a plataforma o exibe entre crases.
+    03_3fn:
+      name: 03_3fn
+      catalog: silver_${var.ambiente}
+      schema: "3fn"
+      serverless: true
+      configuration:
+        catalogo_bronze: bronze_${var.ambiente}
+        catalogo_silver: silver_${var.ambiente}
+      libraries:
+        - notebook:
+            path: ../src/regra.sql
+        - notebook:
+            path: ../src/referencias.sql
+        - notebook:
+            path: ../src/pessoas.sql
+        - notebook:
+            path: ../src/empresas.sql
+        - notebook:
+            path: ../src/veiculos.sql
+        - notebook:
+            path: ../src/fatos.sql
