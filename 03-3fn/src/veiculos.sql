@@ -1,12 +1,14 @@
 -- Databricks notebook source
 -- MAGIC %md
--- MAGIC # 3FN: veículos (`veiculo` e `ativo`)
+-- MAGIC # 3FN: veículos (`veiculo`, `ativo` e `veiculo_sistema`)
 -- MAGIC
 -- MAGIC O mesmo ônibus ou caminhão aparece em três sistemas, e a **placa** liga todos: o *Pátio* (`veiculos`), o *Núcleo*
--- MAGIC (`ativos`, a frota própria) e o *Apólice+* (as apólices do ramo `veiculo`). `veiculo` tem uma linha por placa e,
--- MAGIC nesta variante, **um valor por atributo**: marca, modelo e tipo vêm do *Pátio* (única fonte que descreve o veículo em
--- MAGIC colunas) e o ano vem do *Pátio* e, na falta dele, do *Núcleo*. As placas que só aparecem em apólices ficam com esses
--- MAGIC atributos vazios. Não há `veiculo_sistema`. A regra está em `regra_system_of_record`.
+-- MAGIC (`ativos`, a frota própria) e o *Apólice+* (as apólices do ramo `veiculo`). `veiculo` tem uma linha por placa e
+-- MAGIC **um valor por atributo**: marca, modelo e tipo vêm do *Pátio* (única fonte que descreve o veículo em colunas) e o
+-- MAGIC ano vem do *Pátio* e, na falta dele, do *Núcleo*. As placas que só aparecem em apólices ficam com esses atributos
+-- MAGIC vazios. Essa regra está escrita direto no SQL de `veiculo`, e não em `regra_system_of_record`, porque não depende de
+-- MAGIC ordem entre vários sistemas. `veiculo_sistema` guarda só a correspondência de chaves (`id_veiculo` do *Pátio* e
+-- MAGIC `id_ativo` do *Núcleo*); o *Apólice+* só informa a placa e não aparece nela.
 -- MAGIC
 -- MAGIC A placa Mercosul (`LLLNLNN`) não tem dígito verificador: a normalização só tira separadores e põe em maiúsculas
 -- MAGIC (`normaliza_placa`). Todas as tabelas deste notebook são materialized views sobre a Bronze.

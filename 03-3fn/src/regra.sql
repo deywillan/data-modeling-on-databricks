@@ -2,12 +2,13 @@
 -- MAGIC %md
 -- MAGIC # 3FN com *system of record*: a regra
 -- MAGIC
--- MAGIC Variante da 3FN do artigo 03, completa e independente (mesmo conjunto de tabelas, em `3fn_system_of_record`), para
--- MAGIC comparação. No desenho principal, `pessoa_sistema`, `empresa_sistema` e `veiculo_sistema` guardam o que **cada
--- MAGIC sistema** registrou, e a escolha entre eles fica para o Business Vault. Aqui, a escolha é feita **na integração**, como
--- MAGIC em Inmon (*Building the Data Warehouse*, cap. 9): para cada atributo, uma fonte é a *system of record* (a "melhor" que
--- MAGIC a corporação tem, pelos critérios de completude, oportunidade, precisão, proximidade da entrada e aderência ao modelo),
--- MAGIC e a entidade guarda só o valor dela. As demais fontes só valem quando a preferida não tem valor.
+-- MAGIC Quando dois sistemas gravam valores diferentes para o mesmo atributo da mesma entidade, a 3FN escolhe um **na
+-- MAGIC integração**, como em Inmon (*Building the Data Warehouse*, cap. 9): para cada atributo, uma fonte é a *system of
+-- MAGIC record* (a "melhor" que a corporação tem, pelos critérios de completude, oportunidade, precisão, proximidade da
+-- MAGIC entrada e aderência ao modelo), e a entidade guarda só o valor dela. As demais fontes só valem quando a preferida não
+-- MAGIC tem valor. Esta tabela é essa regra, escrita como dado: `pessoa_historico` e `empresa_historico` a leem para eleger
+-- MAGIC cada atributo. `pessoa_sistema`, `empresa_sistema` e `veiculo_sistema` guardam só a chave que cada sistema deu à
+-- MAGIC entidade, e não os valores das fontes não eleitas.
 -- MAGIC
 -- MAGIC A regra foi definida olhando os dados da série:
 -- MAGIC
