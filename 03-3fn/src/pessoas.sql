@@ -30,6 +30,19 @@
 -- MAGIC
 -- MAGIC **Sequência pela data da fonte:** `ts_operacao` (*Embarque*), `updated_at` (*Apólice+* e *Núcleo*) e a data da foto
 -- MAGIC (*Pátio*). Nunca `_ingestion_at`, que é o relógio da carga.
+-- MAGIC
+-- MAGIC **Os alvos SCD2.** Só o contato e o endereço abrem versão (`TRACK HISTORY ON`); nome, nascimento e data de cadastro
+-- MAGIC ficam na linha sem gerar histórico (a Parte 2 mostrou que o SCD0 puro não tem mecanismo pronto). A PK inclui
+-- MAGIC `__START_AT`, e essa coluna é declarada com as demais, com o mesmo tipo da coluna de `SEQUENCE BY`: `TIMESTAMP` no
+-- MAGIC *Embarque*, no *Apólice+* e no *Núcleo*; `DATE` no *Pátio*, em que a versão é a data da foto (mensal até novembro de
+-- MAGIC 2025, diária depois).
+-- MAGIC
+-- MAGIC **Como a regra é aplicada** (`pessoa_historico`). Em cada instante em que alguma fonte abriu ou fechou uma versão,
+-- MAGIC olham-se as versões vigentes naquele instante e, para cada atributo, `max_by(valor, struct(peso, inicio))` escolhe
+-- MAGIC a de maior prioridade. O peso vem da `regra_system_of_record` (10 menos a prioridade); o `inicio` desempata a favor
+-- MAGIC do cadastro mais recente quando a pessoa tem dois no mesmo sistema; e o `CASE WHEN ... IS NOT NULL` faz a regra cair
+-- MAGIC para a fonte seguinte quando a preferida não tem valor (sem ele, o `max_by` devolveria o nulo da preferida).
+-- MAGIC Versões consecutivas iguais são fundidas, comparando uma assinatura em JSON dos valores eleitos.
 
 -- COMMAND ----------
 

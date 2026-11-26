@@ -10,9 +10,11 @@
 -- MAGIC (artigo 08) faz esse caminho de volta de propósito. As regiões imediata e intermediária do IBGE ficam de fora: o
 -- MAGIC grupo não as usa.
 -- MAGIC
--- MAGIC **Sem correção do código de município.** O `municipio_id` dos outros modelos chega como cada sistema o
--- MAGIC gravou. Os códigos do *Pátio* com 6 ou 8 dígitos não casam com `municipio` e são só contados (expectation): a
--- MAGIC 3FN não os corrige.
+-- MAGIC **Sem correção do código de município.** O `municipio_id` chega como cada sistema o gravou. Em `linha` e `loja`, a
+-- MAGIC expectation `municipio_padrao_ibge` conta o código fora do padrão do IBGE (nos dados da série, zero: é rede de
+-- MAGIC proteção). O defeito real está nos clientes do *Pátio*, que gravam cerca de 2% dos códigos com 6 ou 8 dígitos: a
+-- MAGIC 3FN não os corrige, a regra de *system of record* não os elege para `pessoa` e `empresa`, e a consulta de
+-- MAGIC verificação os conta na Bronze.
 -- MAGIC
 -- MAGIC **A FK declarada não cria dependência de execução.** O pipeline monta a ordem de atualização pelas leituras entre as
 -- MAGIC tabelas, e `FOREIGN KEY ... REFERENCES` não é uma leitura. Sem ela, o filho e o pai podem atualizar ao mesmo tempo, e o

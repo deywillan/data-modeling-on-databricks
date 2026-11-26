@@ -50,6 +50,18 @@ FROM silver_dev.3fn.pessoa_sistema;
 
 -- COMMAND ----------
 
+-- Quantas linhas tem cada tabela de fatos e referência (as contagens principais do artigo)
+SELECT 'passagem' AS tabela, count(*) AS linhas, count_if(estornada) AS marcadas FROM silver_dev.3fn.passagem
+UNION ALL SELECT 'venda_veiculo', count(*), NULL FROM silver_dev.3fn.venda_veiculo
+UNION ALL SELECT 'apolice', count(*), NULL FROM silver_dev.3fn.apolice
+UNION ALL SELECT 'titulo_pagar', count(*), count_if(cancelado) FROM silver_dev.3fn.titulo_pagar
+UNION ALL SELECT 'nota_fiscal', count(*), NULL FROM silver_dev.3fn.nota_fiscal
+UNION ALL SELECT 'ativo', count(*), NULL FROM silver_dev.3fn.ativo
+UNION ALL SELECT 'linha', count(*), NULL FROM silver_dev.3fn.linha
+UNION ALL SELECT 'loja', count(*), NULL FROM silver_dev.3fn.loja;
+
+-- COMMAND ----------
+
 -- Papéis de cada pessoa: quem é só passageiro, quem é passageiro e segurado...
 WITH papeis AS (
   SELECT pessoa_id, array_sort(collect_set(papel)) AS papeis
@@ -60,6 +72,17 @@ SELECT array_join(papeis, ' + ') AS combinacao_de_papeis, count(*) AS pessoas
 FROM papeis
 GROUP BY 1
 ORDER BY 2 DESC;
+
+-- COMMAND ----------
+
+-- Quantas pessoas acumulam três papéis ou mais, contando o colaborador do Núcleo
+SELECT count(*) AS pessoas_com_tres_papeis_ou_mais
+FROM (
+  SELECT pessoa_id
+  FROM silver_dev.3fn.pessoa_sistema
+  GROUP BY pessoa_id
+  HAVING count(DISTINCT papel) >= 3
+);
 
 -- COMMAND ----------
 
@@ -98,6 +121,22 @@ UNION ALL
 SELECT 'empresas',
        (SELECT count(*) FROM empresas_verdadeiras),
        (SELECT count(*) FROM silver_dev.3fn.empresa);
+
+-- COMMAND ----------
+
+-- A sobreposição no mundo verdadeiro: quantas das pessoas do mundo têm papel em mais de uma empresa do grupo
+-- (inclusive o Expresso Vale do Sol, que os sistemas legados atendem)
+WITH empresas AS (
+  SELECT id_entidade, count(DISTINCT empresa) AS empresas
+  FROM silver_dev.gabarito.participacoes
+  WHERE tipo_entidade = 'pessoa'
+  GROUP BY id_entidade
+)
+SELECT (SELECT count(*) FROM silver_dev.gabarito.pessoas) AS pessoas_no_mundo,
+       count_if(empresas > 1)                            AS em_mais_de_uma_empresa,
+       count_if(empresas = 2)                            AS em_duas,
+       count_if(empresas >= 3)                           AS em_tres_ou_mais
+FROM empresas;
 
 -- COMMAND ----------
 
@@ -207,7 +246,53 @@ ORDER BY 1, 3 DESC;
 
 -- COMMAND ----------
 
--- Onde os sistemas divergem: o e-mail do Pátio e o do Apólice+, para quem está nos dois (última versão de cada um, na
+-- Onde os sistemas discordam: para as pessoas que estão em mais de um sistema, em quantas o e-mail, o telefone, o
+-- município ou o nome diferem entre eles (estado atual de cada sistema, na Bronze; o Núcleo só tem o nome). Compara em
+-- minúsculas e o telefone só com dígitos, para não contar diferença de formato. NULL não conta como valor.
+WITH patio_fotos AS (
+  SELECT *, to_date(regexp_extract(_file_name, '_([0-9]{8})_', 1), 'yyyyMMdd') AS data_foto
+  FROM bronze_dev.patio.clientes
+),
+fontes AS (
+  SELECT 'nucleo' AS sistema, cpf, nome, CAST(NULL AS STRING) AS email, CAST(NULL AS STRING) AS telefone, CAST(NULL AS STRING) AS municipio
+  FROM bronze_dev.nucleo.colaboradores
+  QUALIFY row_number() OVER (PARTITION BY matricula ORDER BY updated_at DESC) = 1 AND coalesce(excluido, false) = false
+  UNION ALL
+  SELECT 'embarque', payload:cpf::STRING, payload:nome::STRING, payload:email::STRING, payload:telefone::STRING, payload:cod_municipio::STRING
+  FROM bronze_dev.embarque.clientes
+  QUALIFY row_number() OVER (PARTITION BY payload:id_cliente::BIGINT ORDER BY payload:seq::BIGINT DESC) = 1 AND payload:op::STRING <> 'D'
+  UNION ALL
+  SELECT 'patio', documento, nome, email, telefone, cod_municipio
+  FROM patio_fotos
+  WHERE tipo_pessoa = 'F' AND data_foto = (SELECT max(data_foto) FROM patio_fotos)
+  UNION ALL
+  SELECT 'apolice', cpf, nome, email, telefone, cod_municipio
+  FROM bronze_dev.apolice.segurados
+  WHERE tipo_pessoa = 'PF'
+  QUALIFY row_number() OVER (PARTITION BY codigo_segurado ORDER BY to_timestamp(updated_at) DESC) = 1
+),
+por_pessoa AS (
+  SELECT silver_dev.3fn.normaliza_documento(cpf, 11)            AS cpf,
+         count(DISTINCT sistema)                                 AS sistemas,
+         count(DISTINCT lower(trim(nome)))                       AS nomes,
+         count(DISTINCT lower(trim(email)))                      AS emails,
+         count(DISTINCT regexp_replace(telefone, '[^0-9]', '')) AS telefones,
+         count(DISTINCT municipio)                               AS municipios
+  FROM fontes
+  GROUP BY 1
+)
+SELECT count(*)                                                AS pessoas_em_mais_de_um_sistema,
+       count_if(emails > 1 OR telefones > 1 OR municipios > 1) AS com_contato_ou_municipio_diferente,
+       count_if(emails > 1)                                    AS email_diferente,
+       count_if(telefones > 1)                                 AS telefone_diferente,
+       count_if(municipios > 1)                                AS municipio_diferente,
+       count_if(nomes > 1)                                     AS nome_diferente
+FROM por_pessoa
+WHERE sistemas > 1;
+
+-- COMMAND ----------
+
+-- Um exemplo de divergência: o e-mail do Pátio e o do Apólice+, para quem está nos dois (última versão de cada um, na
 -- Bronze). A 3FN guarda o do Apólice+ (maior prioridade); o do Pátio não é guardado.
 WITH fotos AS (
   SELECT *, to_date(regexp_extract(_file_name, '_([0-9]{8})_', 1), 'yyyyMMdd') AS data_foto
@@ -299,6 +384,13 @@ FROM (
 
 -- COMMAND ----------
 
+-- Quantas versões há no histórico da pessoa e da empresa
+SELECT 'pessoa_historico' AS tabela, count(*) AS versoes, count(DISTINCT pessoa_id) AS entidades FROM silver_dev.3fn.pessoa_historico
+UNION ALL
+SELECT 'empresa_historico', count(*), count(DISTINCT empresa_id) FROM silver_dev.3fn.empresa_historico;
+
+-- COMMAND ----------
+
 -- Versões por pessoa: quantas pessoas têm mais de uma versão
 SELECT versoes, count(*) AS pessoas
 FROM (SELECT pessoa_id, count(*) AS versoes FROM silver_dev.3fn.pessoa_historico GROUP BY pessoa_id)
@@ -332,6 +424,7 @@ ORDER BY inicio;
 
 -- COMMAND ----------
 
+-- MAGIC %md
 -- MAGIC ## 5. PK e FK são informativas
 -- MAGIC
 -- MAGIC As constraints existem no catálogo (Catalog Explorer desenha o diagrama ER a partir delas), mas o Delta **não as
@@ -373,7 +466,7 @@ WHERE p.municipio_id IS NOT NULL AND m.municipio_id IS NULL;
 
 -- COMMAND ----------
 
--- O que ficou de fora: o Pátio grava 2% dos municípios com 6 ou 8 dígitos (foto mais recente). A 3FN não os corrige:
+-- O que ficou de fora: o Pátio grava cerca de 2% dos municípios com 6 ou 8 dígitos (foto mais recente). A 3FN não os corrige:
 -- o valor não é eleito. Quando o Pátio é a única fonte da pessoa, o município dela fica vazio.
 WITH fotos AS (
   SELECT *, to_date(regexp_extract(_file_name, '_([0-9]{8})_', 1), 'yyyyMMdd') AS data_foto
@@ -386,6 +479,13 @@ LEFT JOIN silver_dev.3fn.municipio m ON m.municipio_id = a.cod_municipio
 WHERE m.municipio_id IS NULL
 GROUP BY 1
 ORDER BY 1;
+
+-- COMMAND ----------
+
+-- Pessoas sem município: as que só o Núcleo conhece (ele não registra município) e as que só o Pátio conhece, com
+-- código fora do padrão (o valor não é eleito e não há outra fonte)
+SELECT count(*) AS pessoas, count_if(municipio_id IS NULL) AS sem_municipio
+FROM silver_dev.3fn.pessoa;
 
 -- COMMAND ----------
 
@@ -511,7 +611,7 @@ FROM bronze_dev.apolice.apolices;
 -- MAGIC
 -- MAGIC A 3FN **não lê** o *SolTicket* nem o *SolFin* (os legados do Expresso Vale do Sol, adquirido em 01/07/2025), embora
 -- MAGIC estejam na Bronze desde o artigo 01. As consultas abaixo medem, só na Bronze, o que quebraria se a 3FN os recebesse.
--- MAGIC Cada achado é uma linha da tabela "o que muda em cada tabela da 3FN" do artigo.
+-- MAGIC Cada achado é uma linha da tabela "O que a fonte nova exige" do README deste artigo.
 
 -- COMMAND ----------
 

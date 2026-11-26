@@ -63,6 +63,18 @@ O pipeline lê quatro sistemas (*Núcleo*, *Embarque*, *Pátio* e *Apólice+*) e
 | `normaliza_placa(placa)` | Placa em maiúsculas, sem separadores: a chave de integração do veículo |
 | `converte_valor_brl(texto)` | `"1.234,56"` em `DECIMAL(16,2)`, sem interromper o pipeline se o texto não for um valor |
 
+O que as funções fazem com algumas entradas fixas (seção 7 do notebook de verificação):
+
+| Entrada | `normaliza_documento(..., 11)` | `cpf_valido` |
+|---|---|---|
+| `111.444.777-35` | `11144477735` | verdadeiro |
+| `111.444.777-36` | `11144477736` | falso (segundo dígito errado) |
+| `111` | `00000000111` | falso: o `lpad` dá cara de CPF ao lixo, e só a validação o barra |
+| `111.111.111-11` e `000.000.000-00` | — | falso: passam no cálculo, mas não são emitidos |
+| `5299822472` (um dígito perdido) | `05299822472` | falso |
+
+As funções usam `try_cast`, porque o compute serverless roda em modo ANSI, em que `CAST('a' AS INT)` gera erro. Nos dados da série, a validação **não recusa nenhum CPF**: o catálogo de defeitos só injeta defeitos de formato (máscara, zeros perdidos), nunca dígito verificador errado. Ela fica como rede de proteção.
+
 ### As tabelas
 
 Um notebook SQL por grupo de entidades, em [`src/`](src/). O nome das tabelas está no singular e é o da entidade de negócio, e não o de um sistema (`pessoa`, e não `embarque_clientes`).
@@ -95,14 +107,36 @@ As escolhas do código, explicadas no artigo:
 As chaves primárias e estrangeiras estão declaradas no código das tabelas e aparecem no Catalog Explorer (o diagrama ER é desenhado a partir delas). Elas são **informativas**: o Delta não impede uma duplicata nem uma FK órfã. Duas consequências aparecem no código:
 
 - **A FK não cria dependência de execução.** O pipeline ordena as atualizações pelas leituras entre as tabelas, e `FOREIGN KEY ... REFERENCES` não é uma leitura. Sem uma leitura do pai, o filho e o pai atualizam ao mesmo tempo, e o filho pode falhar com `UC_REFERENTIAL_CONSTRAINT_DOES_NOT_EXIST`. Por isso cada tabela do modelo **junta o pai** na própria consulta (`municipio` junta `uf`, `passagem` junta `pessoa`...). A junção dá a ordem e, de quebra, faz valer a FK.
-- **Quem impõe é a expectation.** As expectations contam o fato sem comprador, sem veículo ou sem fornecedor, e o código de município fora do padrão. Nos dados da série, quase todas contam zero: são rede de proteção. A constraint só muda pela declaração no código do pipeline (`ALTER TABLE` em streaming table falha).
-- **`RELY` só onde a unicidade é garantida pela construção** (`pessoa`, `empresa`, `veiculo`, `regiao`, `uf` e `municipio`, por `SELECT DISTINCT` ou pela chave oficial).
+- **Quem impõe é a expectation.** As expectations contam o fato sem comprador, sem veículo ou sem fornecedor, e o código de município fora do padrão em `linha` e `loja`. Nos dados da série, quase todas contam zero: são rede de proteção. O código de município com defeito, que está nos clientes do *Pátio*, é contado pela consulta de verificação. A constraint só muda pela declaração no código do pipeline (`ALTER TABLE` em streaming table falha).
+- **`RELY` só onde a unicidade é garantida pela construção**: em `pessoa` e `empresa`, pelo `QUALIFY` (uma linha por entidade); em `veiculo`, pelo `GROUP BY` da placa; em `regiao`, `uf` e `municipio`, pelo `SELECT DISTINCT` sobre a chave oficial do IBGE.
+
+### Detalhes do pipeline que o artigo resume
+
+- **Uma view temporária por sistema e entidade** (`apolice_segurado_pf_prep`, `embarque_cliente_prep`...) dá tipo aos campos uma vez: no *Embarque*, o `payload` em `VARIANT` é aberto com o caminho e o tipo de cada campo; no *Pátio* e no *Apólice+*, as colunas chegam como `STRING` e são convertidas; no *Núcleo*, os tipos do Parquet já servem.
+- **A expectation de uma view temporária é contada uma vez por fluxo que lê a view.** Se a view alimenta dois fluxos, o *event log* registra duas vezes a mesma violação; somar as métricas por dataset sem cuidado dobra a contagem.
+- **O *Pátio* não tem expectation.** O fluxo `AUTO CDC ... FROM SNAPSHOT` não aceita expectation, e a expectation da view que o alimenta não registra métrica. Lá o descarte é um filtro explícito (`AND documento_confere`), e a contagem do que foi recusado sai de uma consulta à Bronze (seção 7 do notebook de verificação).
+- **No SCD2, a PK inclui `__START_AT`**, e essa coluna precisa ser declarada com as demais, com o mesmo tipo da coluna de `SEQUENCE BY` (`TIMESTAMP` no *Embarque*, no *Apólice+* e no *Núcleo*; `DATE` no *Pátio*, que usa a data da foto).
+- **Só o contato e o endereço abrem versão** (`TRACK HISTORY ON`). Nome, nascimento e data de cadastro ficam na linha sem gerar histórico; no `colaborador`, abrem versão a empresa do grupo e o cargo.
+- **Numa materialized view, as expectations vêm antes das constraints de PK e FK** na lista de colunas. A ordem inversa dá `PARSE_SYNTAX_ERROR`.
+- **Um alvo por sistema também nos sistemas que poderiam dividir um.** *Embarque*, *Apólice+* e *Núcleo* entregam CDC ou `updated_at` e poderiam escrever num alvo SCD2 único, um fluxo por sistema. O código mantém um alvo por sistema nos quatro para que o padrão seja o mesmo.
+- **Pessoas sem município.** A 3FN só elege código de município com 7 dígitos que existe no IBGE. Quem só está no *Núcleo* (que não registra município) ou só no *Pátio* com código fora do padrão fica com `municipio_id` nulo: 181 pessoas com o relógio em 31/12/2025.
 
 O schema se chama `3fn` e funciona sem crase nas consultas (`silver_dev.3fn.pessoa`). A plataforma, porém, o exibe entre crases (`DESCRIBE SCHEMA`, `SHOW CREATE TABLE`), e ferramentas fora do Databricks podem exigir aspas, porque o identificador começa com dígito.
 
 ## Como conferir o resultado
 
-As consultas do artigo estão no notebook [`consultas/verificacao.sql`](consultas/verificacao.sql), que o deploy envia para a pasta do bundle no workspace. Ele não faz parte do pipeline. Cobre: o que a integração juntou, a conferência com o `gabarito` (pessoas e empresas encontradas contra as verdadeiras), uma pessoa em vários sistemas e a fonte eleita de cada atributo (as 291 que viajam, compram um veículo e têm apólice, conferidas com o gabarito), o histórico da pessoa, as PK e FK que o pipeline não garante, as expectations no *event log*, os documentos recusados e, só na Bronze, o que os legados da aquisição quebrariam.
+As consultas do artigo estão no notebook [`consultas/verificacao.sql`](consultas/verificacao.sql), que o deploy envia para a pasta do bundle no workspace. Ele não faz parte do pipeline. Cobre: o que a integração juntou (com as contagens das tabelas), a conferência com o `gabarito` (pessoas e empresas encontradas contra as verdadeiras, e a sobreposição entre as empresas do grupo), uma pessoa em vários sistemas, onde os sistemas discordam e a fonte eleita de cada atributo (as 291 que viajam, compram um veículo e têm apólice, conferidas com o gabarito), o histórico da pessoa e da empresa, as PK e FK que o pipeline não garante (e as pessoas sem município), as expectations no *event log*, os documentos recusados e, só na Bronze, o que os legados da aquisição quebrariam.
+
+A seção 8 do notebook mede, só na Bronze, o que os legados do Expresso Vale do Sol (*SolTicket* e *SolFin*) quebrariam se entrassem na 3FN. Cada achado muda uma tabela:
+
+| Tabela da 3FN | O que a fonte nova exige |
+|---|---|
+| `pessoa_sistema` | Ganha um sistema. É a mudança fácil |
+| `regra_system_of_record` | Ganha uma linha por atributo, e o negócio precisa decidir onde a fonte nova entra na ordem |
+| `pessoa` e `pessoa_historico` | Recebem uma fonte sem e-mail e com CPF repetido (133 no *SolTicket*): o desempate pelo cadastro mais recente passa a decidir |
+| `passagem` | Recebe outro ciclo de vida (canal `telefone`, sem remarcação) e passagens órfãs (1.007 de 199.916), que obrigam a escolher entre rejeitar e aceitar sem linha |
+| `titulo_pagar` | As categorias do *SolFin* (`Aluguel`, `Combustível`) pedem um de-para com as do *Núcleo* que o negócio ainda não decidiu |
+| Tudo | Reprocessamento desde janeiro de 2024 |
 
 Para ver o histórico trabalhar, avance o relógio, rode a Bronze e depois este pipeline, e procure uma troca de telefone no *Pátio* (foto diária) ou no *Apólice+*: se o sistema é o eleito para o telefone, `pessoa_historico` ganha uma versão nova e a anterior é fechada.
 

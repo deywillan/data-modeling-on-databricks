@@ -21,6 +21,11 @@
 -- MAGIC expectations contam o fato sem comprador, sem veículo ou sem fornecedor. Nos dados da série elas contam zero (a
 -- MAGIC FK órfã injetada existe só no *SolTicket*, que a 3FN não lê): são rede de proteção. A órfã real é medida na Bronze
 -- MAGIC dos legados, na seção "Comparando" do artigo.
+-- MAGIC
+-- MAGIC **Ordem na declaração.** Na lista de colunas de uma materialized view, as expectations (`CONSTRAINT ... EXPECT`)
+-- MAGIC vêm **antes** das constraints de PK e FK; a ordem inversa dá `PARSE_SYNTAX_ERROR`. E as constraints só mudam pela
+-- MAGIC declaração: `ALTER TABLE` numa tabela do pipeline falha (`STREAMING_TABLE_OPERATION_NOT_ALLOWED` nas streaming
+-- MAGIC tables), e para trocar uma PK altera-se este código.
 
 -- COMMAND ----------
 
