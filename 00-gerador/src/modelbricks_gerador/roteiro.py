@@ -246,6 +246,7 @@ class ParametrosSolFin(_Modelo):
 
 class Parametros(_Modelo):
     pessoas_em_mais_de_uma_empresa: float = Field(ge=0, le=1)
+    pessoas_em_tres_empresas: float = Field(ge=0, le=1)
     eventos_por_frete: Intervalo
     telemetria_dias_carga_inicial: int = Field(gt=0)
     embarque: ParametrosEmbarque
@@ -367,6 +368,8 @@ class Roteiro(_Modelo):
         intervalo = self.parametros.eventos_por_frete
         if intervalo.minimo > intervalo.maximo:
             erros.append("parametros.eventos_por_frete.minimo é maior que o máximo")
+        if self.parametros.pessoas_em_tres_empresas > self.parametros.pessoas_em_mais_de_uma_empresa:
+            erros.append("parametros.pessoas_em_tres_empresas é maior que pessoas_em_mais_de_uma_empresa")
         erros += self._coerencia_do_mundo()
         erros += self._coerencia_do_embarque()
         erros += self._coerencia_do_rastro()
